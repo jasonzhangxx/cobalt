@@ -356,6 +356,7 @@ component("core") {
     "//services/service_manager/public/cpp",
     "//skia",
     "//skia:skcms",
+    "//starboard/build:starboard_buildflags",
     "//storage/common",
     "//third_party/blink/public:buildflags",
     "//third_party/blink/public:image_resources_grit",
@@ -394,6 +395,12 @@ component("core") {
     frameworks = [
       "AppKit.framework",
       "Carbon.framework",
+    ]
+  }
+
+  if (is_cobalt) {
+    deps += [
+      "//starboard($starboard_toolchain)"
     ]
   }
 }

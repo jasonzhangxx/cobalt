@@ -389,6 +389,7 @@ source_set("base") {
     "//media/cdm:clear_key_cdm_common",
     "//net",
     "//skia",
+    "//starboard/build:starboard_buildflags",
     "//third_party/libyuv",
     "//third_party/widevine/cdm:headers",
     "//ui/display:display",
@@ -476,6 +477,12 @@ source_set("base") {
       "media_drm_key_type.h",
       "media_drm_storage.cc",
       "media_drm_storage.h",
+    ]
+  }
+
+  if (is_cobalt) {
+    deps += [
+      "//starboard($starboard_toolchain)"
     ]
   }
 }

@@ -74,6 +74,7 @@ component("media") {
     "//components/viz/common",
     "//media:media_buildflags",
     "//media:shared_memory_support",
+    "//starboard/build:starboard_buildflags",
     "//net",
     "//services/network/public/cpp",
     "//third_party/blink/public/common",
@@ -110,6 +111,12 @@ component("media") {
     sources += [
       "hls_data_source_provider_impl.cc",
       "hls_data_source_provider_impl.h",
+    ]
+  }
+
+  if (is_cobalt) {
+    deps += [
+      "//starboard($starboard_toolchain)"
     ]
   }
 }

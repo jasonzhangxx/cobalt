@@ -57,6 +57,12 @@
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
+// For BUILDFLAG(USE_STARBOARD_MEDIA)
+#include "starboard/build/starboard_buildflags.h"
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+#include "starboard/media.h"
+#endif
+
 using blink::WebMediaSource;
 using blink::WebSourceBuffer;
 
@@ -520,6 +526,12 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
     return false;
   }
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Interupt Chromium's IsTypeSupported() from here to avoid unnecessary parsings for better performance. 
+  SbMediaSupportType support_type =
+          SbMediaCanPlayMimeAndKeySystem(type.DeprecatedLower().Ascii().c_str(), "");
+  return support_type != kSbMediaSupportTypeNotSupported;
+#else
   // 2. If type does not contain a valid MIME type string, then return false.
   ContentType content_type(type);
   String mime_type = content_type.GetType();
@@ -584,6 +596,7 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
   }
 #endif  // BUILDFLAG(ENABLE_PLATFORM_ENCRYPTED_DOLBY_VISION)
 
+
   // Note: MediaSource.isTypeSupported() returning true implies that
   // HTMLMediaElement.canPlayType() will return "maybe" or "probably" since it
   // does not make sense for a MediaSource to support a type the
@@ -624,6 +637,7 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
            << (result ? "true" : "false");
   RecordIdentifiabilityMetric(context, type, result);
   return result;
+#endif
 }
 
 // static

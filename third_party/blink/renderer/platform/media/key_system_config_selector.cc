@@ -30,6 +30,12 @@
 #include "third_party/blink/public/web/modules/media/webmediaplayer_util.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 
+// For BUILDFLAG(USE_STARBOARD_MEDIA)
+#include "starboard/build/starboard_buildflags.h"
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+#include "starboard/media.h"
+#endif
+
 namespace blink {
 namespace {
 
@@ -411,9 +417,13 @@ bool KeySystemConfigSelector::IsSupportedContentType(
   // is done primarily to validate extended codecs, but it also ensures that the
   // CDM cannot support codecs that Chrome does not (which could complicate the
   // robustness algorithm).
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if(SbMediaCanPlayMimeAndKeySystem(container_lower.c_str(), "") == kSbMediaSupportTypeNotSupported) {
+#else
   if (!is_supported_media_type_cb_.Run(
           container_lower, codecs,
           key_systems_->CanUseAesDecryptor(key_system))) {
+#endif
     DVLOG(3) << "Container mime type and codecs are not supported";
     return false;
   }

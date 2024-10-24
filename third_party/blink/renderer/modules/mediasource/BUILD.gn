@@ -48,8 +48,15 @@ blink_modules_sources("mediasource") {
   deps = [
     "//build:chromeos_buildflags",
     "//media",
+    "//starboard/build:starboard_buildflags",
 
     # Ensure the generated webcodecs v8 config and chunk bindings are available.
     "//third_party/blink/renderer/modules/webcodecs:webcodecs",
   ]
+
+  if (is_cobalt) {
+    deps += [
+      "//starboard($starboard_toolchain)",
+    ]
+  }
 }
