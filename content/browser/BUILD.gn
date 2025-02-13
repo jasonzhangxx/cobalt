@@ -27,6 +27,9 @@ import("//tools/ipc_fuzzer/ipc_fuzzer.gni")
 if (is_mac) {
   import("//content/public/app/mac_helpers.gni")
 }
+if (is_cobalt) {
+  import("//starboard/build/buildflags.gni")
+}
 
 buildflag_header("buildflags") {
   header = "buildflags.h"
@@ -3351,6 +3354,13 @@ source_set("browser") {
       "devtools/protocol/native_profiling_handler.h",
       "profiling_utils.cc",
     ]
+  }
+
+  if (is_cobalt) {
+    sources += [
+      "//cobalt/browser/media_session/media_session_cobalt.cc",
+      "//cobalt/browser/media_session/media_session_cobalt.h",
+    ] 
   }
 }
 

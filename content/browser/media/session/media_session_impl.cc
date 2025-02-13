@@ -44,6 +44,10 @@
 #include "content/browser/media/session/media_session_android.h"
 #endif  // BUILDFLAG(IS_ANDROID)
 
+#if BUILDFLAG(IS_COBALT)
+#include "cobalt/browser/media_session/media_session_cobalt.h"
+#endif  // BUILDFLAG(IS_COBALT)
+
 namespace content {
 
 using blink::mojom::MediaSessionPlaybackState;
@@ -990,6 +994,9 @@ MediaSessionImpl::MediaSessionImpl(WebContents* web_contents)
   session_android_ = std::make_unique<MediaSessionAndroid>(this);
   should_throttle_duration_update_ = true;
 #endif  // BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_COBALT)
+  session_cobalt_ = std::make_unique<cobalt::media_session::MediaSessionCobalt>(this);
+#endif  // BUILDFLAG(IS_COBALT)
   if (web_contents && web_contents->GetPrimaryMainFrame() &&
       web_contents->GetPrimaryMainFrame()->GetView()) {
     focused_ = web_contents->GetPrimaryMainFrame()->GetView()->HasFocus();

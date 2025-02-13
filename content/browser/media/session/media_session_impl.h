@@ -37,9 +37,21 @@
 #include "base/android/scoped_java_ref.h"
 #endif  // BUILDFLAG(IS_ANDROID)
 
+// #if BUILDFLAG(IS_COBALT)
+// #include "cobalt/browser/media_session/media_session_cobalt.h"
+// #endif  // BUILDFLAG(IS_COBALT)
+
 namespace media_session {
 struct MediaMetadata;
 }  // namespace media_session
+
+#if BUILDFLAG(IS_COBALT)
+namespace cobalt {
+namespace media_session {
+class MediaSessionCobalt;
+} // namespace media_session
+} // namespace cobalt
+#endif  // BUILDFLAG(IS_COBALT)
 
 namespace content {
 
@@ -583,6 +595,10 @@ class MediaSessionImpl : public MediaSession,
 #if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<MediaSessionAndroid> session_android_;
 #endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_COBALT)
+  std::unique_ptr<cobalt::media_session::MediaSessionCobalt> session_cobalt_;
+#endif  // BUILDFLAG(IS_COBALT)
 
   // MediaSessionService-related fields
   using ServicesMap =
