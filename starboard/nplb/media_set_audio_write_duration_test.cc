@@ -45,6 +45,19 @@ class SbMediaSetAudioWriteDurationTest
  public:
   SbMediaSetAudioWriteDurationTest() : dmp_reader_(GetParam()) {}
 
+  void SetUp() override {
+    SbMediaAudioCodec audio_codec = dmp_reader_.audio_codec();
+    PlayerCreationParam creation_param = CreatePlayerCreationParam(
+        audio_codec, kSbMediaVideoCodecNone, kSbPlayerOutputModeInvalid);
+    SbPlayerCreationParam param = {};
+    creation_param.ConvertTo(&param);
+    creation_param.output_mode = SbPlayerGetPreferredOutputMode(&param);
+
+    SbPlayerTestConfig test_config(GetParam(), "", creation_param.output_mode,
+                                   "");
+    SkipTestIfUnsupported(test_config);
+  }
+
   void TryToWritePendingSample() {
     {
       starboard::ScopedSpinLock lock(&pending_decoder_status_lock_);
@@ -286,10 +299,7 @@ std::vector<const char*> GetSupportedTests() {
   for (auto filename : kFilenames) {
     VideoDmpReader dmp_reader(filename, VideoDmpReader::kEnableReadOnDemand);
     SB_DCHECK(dmp_reader.number_of_audio_buffers() > 0);
-    if (SbMediaCanPlayMimeAndKeySystem(dmp_reader.audio_mime_type().c_str(),
-                                       "")) {
-      test_params.push_back(filename);
-    }
+    test_params.push_back(filename);
   }
 
   SB_DCHECK(!test_params.empty());
@@ -298,7 +308,7 @@ std::vector<const char*> GetSupportedTests() {
 
 INSTANTIATE_TEST_CASE_P(SbMediaSetAudioWriteDurationTests,
                         SbMediaSetAudioWriteDurationTest,
-                        ValuesIn(GetSupportedTests()));
+                        ValuesIn(GetAudioTestFiles()));
 }  // namespace
 }  // namespace nplb
 }  // namespace starboard

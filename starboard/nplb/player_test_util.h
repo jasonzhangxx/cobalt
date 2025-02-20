@@ -59,12 +59,12 @@ std::vector<const char*> GetAudioTestFiles();
 std::vector<const char*> GetVideoTestFiles();
 std::vector<SbPlayerOutputMode> GetPlayerOutputModes();
 std::vector<const char*> GetKeySystems();
-
-std::vector<SbPlayerTestConfig> GetSupportedSbPlayerTestConfigs(
-    const char* key_system = "");
+std::vector<SbPlayerTestConfig> GetAllPlayerTestConfigs();
 
 std::string GetSbPlayerTestConfigName(
     ::testing::TestParamInfo<SbPlayerTestConfig> info);
+
+void SkipTestIfUnsupported(const SbPlayerTestConfig& config);
 
 void DummyDeallocateSampleFunc(SbPlayer player,
                                void* context,
