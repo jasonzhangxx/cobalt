@@ -318,6 +318,10 @@ class VideoDecoder::Sink : public VideoDecoder::VideoRendererSink {
     return rendered_;
   }
 
+  void SetVideoSurfaceHolder(VideoSurfaceHolder* holder) {
+    video_surface_holder_ = holder;
+  }
+
  private:
   void SetRenderCB(RenderCB render_cb) override {
     SB_DCHECK(!render_cb_);
@@ -326,7 +330,9 @@ class VideoDecoder::Sink : public VideoDecoder::VideoRendererSink {
     render_cb_ = render_cb;
   }
 
-  void SetBounds(int z_index, int x, int y, int width, int height) override {}
+  void SetBounds(int z_index, int x, int y, int width, int height) override {
+    video_surface_holder_->SetBounds(z_index, x, y, width, height);
+  }
 
   DrawFrameStatus DrawFrame(const scoped_refptr<VideoFrame>& frame,
                             int64_t release_time_in_nanoseconds) {
@@ -337,6 +343,7 @@ class VideoDecoder::Sink : public VideoDecoder::VideoRendererSink {
     return kReleased;
   }
 
+  VideoSurfaceHolder* video_surface_holder_ = nullptr;
   RenderCB render_cb_;
   bool rendered_;
 };
@@ -412,16 +419,12 @@ VideoDecoder::VideoDecoder(const VideoStreamInfo& video_stream_info,
 
 VideoDecoder::~VideoDecoder() {
   TeardownCodec();
-  if (tunnel_mode_audio_session_id_ != -1) {
-    ClearVideoWindow(force_reset_surface_under_tunnel_mode_);
-  } else {
-    ClearVideoWindow(force_reset_surface_);
-  }
 }
 
 scoped_refptr<VideoDecoder::VideoRendererSink> VideoDecoder::GetSink() {
   if (sink_ == NULL) {
-    sink_ = new Sink;
+    sink_ = new Sink();
+    sink_->SetVideoSurfaceHolder(this);
   }
   return sink_;
 }

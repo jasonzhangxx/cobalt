@@ -14,11 +14,8 @@
 
 #include "starboard/android/shared/video_window.h"
 
-#include <EGL/egl.h>
-#include <GLES2/gl2.h>
-#include <android/native_window.h>
-#include <android/native_window_jni.h>
 #include <jni.h>
+#include <vector>
 
 #include "starboard/android/shared/jni_env_ext.h"
 #include "starboard/common/log.h"
@@ -33,115 +30,96 @@ namespace shared {
 
 namespace {
 
+struct VideoSurfaceEntry {
+  VideoSurfaceEntry(jobject surface_view, jobject surface) {
+    j_surface_view = surface_view;
+    j_surface = surface;
+  }
+
+  jobject j_surface_view;
+  jobject j_surface;
+  VideoSurfaceHolder* surface_holder = nullptr;
+};
+
 // Global video surface pointer mutex.
 SB_ONCE_INITIALIZE_FUNCTION(Mutex, GetViewSurfaceMutex);
-// Global pointer to the single video surface.
-jobject g_j_video_surface = NULL;
-// Global pointer to the single video window.
-ANativeWindow* g_native_video_window = NULL;
-// Global video surface pointer holder.
-VideoSurfaceHolder* g_video_surface_holder = NULL;
-// Global boolean to indicate if we need to reset SurfaceView after playing
-// vertical video.
-bool g_reset_surface_on_clear_window = false;
+// Global pointer to video surfaces and video surface pointer holders.
+std::vector<VideoSurfaceEntry> g_video_surfaces;
 
 }  // namespace
 
 extern "C" SB_EXPORT_PLATFORM void
-Java_dev_cobalt_media_VideoSurfaceView_nativeOnVideoSurfaceChanged(
+Java_dev_cobalt_media_VideoSurfaceView_nativeOnVideoSurfaceCreated(
     JNIEnv* env,
     jobject unused_this,
-    jobject surface) {
+    jobject surface,
+    jobject surface_view) {
+  SB_DCHECK(surface);
+
   ScopedLock lock(*GetViewSurfaceMutex());
-  if (g_video_surface_holder) {
-    g_video_surface_holder->OnSurfaceDestroyed();
-    g_video_surface_holder = NULL;
-  }
-  if (g_j_video_surface) {
-    env->DeleteGlobalRef(g_j_video_surface);
-    g_j_video_surface = NULL;
-  }
-  if (g_native_video_window) {
-    ANativeWindow_release(g_native_video_window);
-    g_native_video_window = NULL;
-  }
-  if (surface) {
-    g_j_video_surface = env->NewGlobalRef(surface);
-    g_native_video_window = ANativeWindow_fromSurface(env, surface);
-  }
+  g_video_surfaces.emplace_back(env->NewGlobalRef(surface_view),
+                                env->NewGlobalRef(surface));
+
+  SB_LOG(ERROR) << "Received a surface, currently we have "
+                << g_video_surfaces.size() << " surfaces.";
 }
 
 extern "C" SB_EXPORT_PLATFORM void
-Java_dev_cobalt_media_VideoSurfaceView_nativeSetNeedResetSurface(
+Java_dev_cobalt_media_VideoSurfaceView_nativeOnVideoSurfaceCDestroyed(
     JNIEnv* env,
-    jobject unused_this) {
-  g_reset_surface_on_clear_window = true;
-}
-
-// static
-bool VideoSurfaceHolder::IsVideoSurfaceAvailable() {
-  // We only consider video surface is available when there is a video
-  // surface and it is not held by any decoder, i.e.
-  // g_video_surface_holder is NULL.
-  ScopedLock lock(*GetViewSurfaceMutex());
-  return !g_video_surface_holder && g_j_video_surface;
+    jobject unused_this,
+    jobject surface,
+    jobject surface_view) {
+  for (auto it = g_video_surfaces.begin(); it != g_video_surfaces.end(); ++it) {
+    if (env->IsSameObject(surface, it->j_surface)) {
+      if (it->surface_holder) {
+        it->surface_holder->OnSurfaceDestroyed();
+      }
+      env->DeleteGlobalRef(it->j_surface_view);
+      env->DeleteGlobalRef(it->j_surface);
+      g_video_surfaces.erase(it);
+      SB_LOG(ERROR) << "Destroyed a surface, currently we have "
+                    << g_video_surfaces.size() << " surfaces.";
+      return;
+    }
+  }
+  SB_NOTREACHED();
 }
 
 jobject VideoSurfaceHolder::AcquireVideoSurface() {
   ScopedLock lock(*GetViewSurfaceMutex());
-  if (g_video_surface_holder != NULL) {
-    return NULL;
+  for (auto it = g_video_surfaces.begin(); it != g_video_surfaces.end(); ++it) {
+    if (!it->surface_holder) {
+      it->surface_holder = this;
+      return it->j_surface;
+    }
   }
-  if (!g_j_video_surface) {
-    return NULL;
-  }
-  g_video_surface_holder = this;
-  return g_j_video_surface;
+  SB_LOG(ERROR) << "No available video surface right now, currently we have "
+                << g_video_surfaces.size() << " surfaces.";
+  return NULL;
 }
 
 void VideoSurfaceHolder::ReleaseVideoSurface() {
   ScopedLock lock(*GetViewSurfaceMutex());
-  if (g_video_surface_holder == this) {
-    g_video_surface_holder = NULL;
+  for (auto it = g_video_surfaces.begin(); it != g_video_surfaces.end(); ++it) {
+    if (it->surface_holder == this) {
+      it->surface_holder = nullptr;
+      return;
+    }
   }
 }
 
-bool VideoSurfaceHolder::GetVideoWindowSize(int* width, int* height) {
+void VideoSurfaceHolder::SetBounds(int z_index,
+                                   int x,
+                                   int y,
+                                   int width,
+                                   int height) {
   ScopedLock lock(*GetViewSurfaceMutex());
-  if (g_native_video_window == NULL) {
-    return false;
-  } else {
-    *width = ANativeWindow_getWidth(g_native_video_window);
-    *height = ANativeWindow_getHeight(g_native_video_window);
-    return true;
-  }
-}
-
-void VideoSurfaceHolder::ClearVideoWindow(bool force_reset_surface) {
-  // Lock *GetViewSurfaceMutex() here, to avoid releasing g_native_video_window
-  // during painting.
-  ScopedLock lock(*GetViewSurfaceMutex());
-
-  if (!g_native_video_window) {
-    SB_LOG(INFO) << "Tried to clear video window when it was null.";
-    return;
-  }
-
-  JniEnvExt* env = JniEnvExt::Get();
-  if (!env) {
-    SB_LOG(INFO) << "Tried to clear video window when JniEnvExt was null.";
-    return;
-  }
-
-  if (force_reset_surface) {
-    env->CallStarboardVoidMethodOrAbort("resetVideoSurface", "()V");
-    SB_LOG(INFO) << "Video surface has been reset.";
-    return;
-  } else if (g_reset_surface_on_clear_window) {
-    int width = ANativeWindow_getWidth(g_native_video_window);
-    int height = ANativeWindow_getHeight(g_native_video_window);
-    if (width <= height) {
-      env->CallStarboardVoidMethodOrAbort("resetVideoSurface", "()V");
+  for (auto it = g_video_surfaces.begin(); it != g_video_surfaces.end(); ++it) {
+    if (it->surface_holder == this) {
+      JniEnvExt* env = JniEnvExt::Get();
+      env->CallVoidMethodOrAbort(it->j_surface_view, "setVideoSurfaceBounds",
+                                 "(IIII)V", x, y, width, height);
       return;
     }
   }

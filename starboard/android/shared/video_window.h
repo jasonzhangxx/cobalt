@@ -24,14 +24,13 @@ namespace shared {
 
 class VideoSurfaceHolder {
  public:
-  // Return true only if the video surface is available.
-  static bool IsVideoSurfaceAvailable();
-
   // OnSurfaceDestroyed() will be invoked when surface is destroyed. When this
   // function is called, the decoder no longer owns the surface. Calling
   // AcquireVideoSurface(), ReleaseVideoSurface(), GetVideoWindowSize() or
   // ClearVideoWindow() in this function may cause dead lock.
   virtual void OnSurfaceDestroyed() = 0;
+
+  void SetBounds(int z_index, int x, int y, int width, int height);
 
  protected:
   ~VideoSurfaceHolder() {}
@@ -42,13 +41,6 @@ class VideoSurfaceHolder {
 
   // Release the surface to make the surface available for other holder.
   void ReleaseVideoSurface();
-
-  // Get the native window size. Return false if don't have available native
-  // window.
-  bool GetVideoWindowSize(int* width, int* height);
-
-  // Clear the video window by painting it Black.
-  void ClearVideoWindow(bool force_reset_surface);
 };
 
 }  // namespace shared

@@ -612,28 +612,6 @@ public class StarboardBridge {
   // }
 
   // TODO: (cobalt b/372559388) remove or migrate JNI?
-  // Used in starboard/android/shared/video_window.cc
-  @SuppressWarnings("unused")
-  @UsedByNative
-  public void resetVideoSurface() {
-    Activity activity = activityHolder.get();
-    if (activity instanceof CobaltActivity) {
-      ((CobaltActivity) activity).resetVideoSurface();
-    }
-  }
-
-  // TODO: (cobalt b/372559388) remove or migrate JNI?
-  // Used in starboard/android/shared/player_set_bounds.cc
-  @SuppressWarnings("unused")
-  @UsedByNative
-  public void setVideoSurfaceBounds(final int x, final int y, final int width, final int height) {
-    Activity activity = activityHolder.get();
-    if (activity instanceof CobaltActivity) {
-      ((CobaltActivity) activity).setVideoSurfaceBounds(x, y, width, height);
-    }
-  }
-
-  // TODO: (cobalt b/372559388) remove or migrate JNI?
   // Used in starboard/android/shared/media_capabilities_cache.cc
   /** Return supported hdr types. */
   @SuppressWarnings("unused")

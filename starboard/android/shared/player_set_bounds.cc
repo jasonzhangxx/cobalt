@@ -28,7 +28,5 @@ void SbPlayerSetBounds(SbPlayer player,
     SB_DLOG(WARNING) << "player is invalid.";
     return;
   }
-  starboard::android::shared::JniEnvExt::Get()->CallStarboardVoidMethodOrAbort(
-      "setVideoSurfaceBounds", "(IIII)V", x, y, width, height);
   player->SetBounds(z_index, x, y, width, height);
 }

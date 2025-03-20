@@ -179,27 +179,6 @@ SbPlayer SbPlayerCreate(SbWindow window,
     return kSbPlayerInvalid;
   }
 
-  if (creation_param->output_mode != kSbPlayerOutputModeDecodeToTexture &&
-      // TODO: This is temporary for supporting background media playback.
-      //       Need to be removed with media refactor.
-      //
-      // Now this code is also used to avoid creating multiple punch-out player
-      // as it happens to work as is.  Note that even without the check here,
-      // SbPlayer will properly handle this by reporting error in VideoDecoder,
-      // when it fails to acquire the surface.
-      video_codec != kSbMediaVideoCodecNone) {
-    // Check the availability of the video window. As we only support one main
-    // player, and sub players are in decode to texture mode on Android, a
-    // single video window should be enough.
-    if (!starboard::android::shared::VideoSurfaceHolder::
-            IsVideoSurfaceAvailable()) {
-      SB_LOG(ERROR) << "Video surface is not available now.";
-      player_error_func(kSbPlayerInvalid, context, kSbPlayerErrorDecode,
-                        "Video surface is not available now");
-      return kSbPlayerInvalid;
-    }
-  }
-
   std::unique_ptr<PlayerWorker::Handler> handler(
       new FilterBasedPlayerWorkerHandler(creation_param, provider));
   handler->SetMaxVideoInputSize(
