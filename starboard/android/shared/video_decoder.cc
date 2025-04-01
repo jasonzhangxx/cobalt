@@ -368,7 +368,8 @@ VideoDecoder::VideoDecoder(const VideoStreamInfo& video_stream_info,
       decode_target_graphics_context_provider_(
           decode_target_graphics_context_provider),
       max_video_capabilities_(max_video_capabilities),
-      require_software_codec_(IsSoftwareDecodeRequired(max_video_capabilities)),
+      // require_software_codec_(IsSoftwareDecodeRequired(max_video_capabilities)),
+      require_software_codec_(true),
       force_big_endian_hdr_metadata_(force_big_endian_hdr_metadata),
       tunnel_mode_audio_session_id_(tunnel_mode_audio_session_id),
       max_video_input_size_(max_video_input_size),
@@ -724,6 +725,9 @@ bool VideoDecoder::InitializeCodec(const VideoStreamInfo& video_stream_info,
   //                    `max_video_capabilities_` and pass to MediaDecoder ctor.
   ParseMaxResolution(max_video_capabilities_, video_stream_info.frame_width,
                      video_stream_info.frame_height, &max_width, &max_height);
+
+  max_width = 1920;
+  max_height = 1080;
 
   media_decoder_.reset(new MediaDecoder(
       this, video_stream_info.codec, video_stream_info.frame_width,

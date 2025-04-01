@@ -236,9 +236,15 @@ public abstract class CobaltActivity extends Activity {
     initializeJavaBridge();
     getStarboardBridge().setWebContents(getActiveWebContents());
 
+    shellUrl = "https://jasonzhangxx.github.io/test/multi-encrypted-video.html";
+    // shellUrl = "https://jasonzh.yts.devicecertification.youtube/latest/manual/dual_video.html";
+    // shellUrl = "https://dev-jasonzh-dot-ytlr-cert.appspot.com/";
+
     // Load the `url` with the same shell we created above.
     Log.i(TAG, "shellManager load url:" + shellUrl);
     mShellManager.getActiveShell().loadUrl(shellUrl);
+
+    createSurfaceViews();
   }
 
   // Initially copied from ContentShellActiviy.java
@@ -390,7 +396,7 @@ public abstract class CobaltActivity extends Activity {
     super.onCreate(savedInstanceState);
     createContent(savedInstanceState);
 
-    createSurfaceViews();
+    // createSurfaceViews();
   }
 
   /**
@@ -600,6 +606,7 @@ public abstract class CobaltActivity extends Activity {
   private void createSurfaceViews() {
     for (int i = 0; i < 5; i++) {
       VideoSurfaceView videoSurfaceView = new VideoSurfaceView(this);
+      // videoSurfaceView.setZOrderOnTop(true);
       addContentView(
           videoSurfaceView, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
     }

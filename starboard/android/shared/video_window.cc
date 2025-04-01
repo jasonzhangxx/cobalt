@@ -91,6 +91,7 @@ jobject VideoSurfaceHolder::AcquireVideoSurface() {
   for (auto it = g_video_surfaces.begin(); it != g_video_surfaces.end(); ++it) {
     if (!it->surface_holder) {
       it->surface_holder = this;
+      SB_LOG(ERROR) << "Find an available surface " << it->j_surface;
       return it->j_surface;
     }
   }
@@ -103,6 +104,7 @@ void VideoSurfaceHolder::ReleaseVideoSurface() {
   ScopedLock lock(*GetViewSurfaceMutex());
   for (auto it = g_video_surfaces.begin(); it != g_video_surfaces.end(); ++it) {
     if (it->surface_holder == this) {
+      SB_LOG(ERROR) << "Release surface " << it->j_surface;
       it->surface_holder = nullptr;
       return;
     }
@@ -118,6 +120,8 @@ void VideoSurfaceHolder::SetBounds(int z_index,
   for (auto it = g_video_surfaces.begin(); it != g_video_surfaces.end(); ++it) {
     if (it->surface_holder == this) {
       JniEnvExt* env = JniEnvExt::Get();
+      SB_LOG(ERROR) << "SetBounds " << it->j_surface << " & "
+                    << it->j_surface_view;
       env->CallVoidMethodOrAbort(it->j_surface_view, "setVideoSurfaceBounds",
                                  "(IIII)V", x, y, width, height);
       return;

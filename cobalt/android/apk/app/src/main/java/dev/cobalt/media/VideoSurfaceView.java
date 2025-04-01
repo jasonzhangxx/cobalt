@@ -19,6 +19,7 @@ import static dev.cobalt.media.Log.TAG;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.PixelFormat;
 import android.util.AttributeSet;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -74,6 +75,7 @@ public class VideoSurfaceView extends SurfaceView {
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
       nativeOnVideoSurfaceCreated(holder.getSurface(), this.surfaceView);
+      holder.setFormat(PixelFormat.TRANSPARENT);
     }
 
     @Override
