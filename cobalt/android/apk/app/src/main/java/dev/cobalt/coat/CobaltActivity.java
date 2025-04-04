@@ -236,9 +236,9 @@ public abstract class CobaltActivity extends Activity {
     initializeJavaBridge();
     getStarboardBridge().setWebContents(getActiveWebContents());
 
-    shellUrl = "https://jasonzhangxx.github.io/test/multi-encrypted-video.html";
+    // shellUrl = "https://jasonzhangxx.github.io/test/multi-encrypted-video.html";
     // shellUrl = "https://jasonzh.yts.devicecertification.youtube/latest/manual/dual_video.html";
-    // shellUrl = "https://dev-jasonzh-dot-ytlr-cert.appspot.com/";
+    shellUrl = "https://osagie98.github.io/multiple-player-demo/multi-encrypted-video.html";
 
     // Load the `url` with the same shell we created above.
     Log.i(TAG, "shellManager load url:" + shellUrl);

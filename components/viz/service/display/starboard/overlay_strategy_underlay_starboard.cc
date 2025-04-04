@@ -166,7 +166,7 @@ bool OverlayStrategyUnderlayStarboard::Attempt(
       OverlayProposedCandidate proposed_to_commit(it, candidate, this);
       CommitCandidate(proposed_to_commit, render_pass);
 
-      break;
+      // break;
     }
   }
 
