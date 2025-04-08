@@ -475,6 +475,8 @@ public abstract class CobaltActivity extends Activity {
     if (webContents != null) {
       webContents.onHide();
     }
+
+    System.exit(0);
   }
 
   @Override
