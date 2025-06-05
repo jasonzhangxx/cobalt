@@ -114,6 +114,8 @@ class VideoDecoder
   void RefreshOutputFormat(MediaCodecBridge* media_codec_bridge) override;
   bool Tick(MediaCodecBridge* media_codec_bridge) override;
   void OnFlushing() override;
+  bool IsBufferDecodeOnly(
+      const scoped_refptr<InputBuffer>& input_buffer) override;
 
   void TryToSignalPrerollForTunnelMode();
   bool IsFrameRenderedCallbackEnabled();
