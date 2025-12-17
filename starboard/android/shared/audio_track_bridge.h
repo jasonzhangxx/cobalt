@@ -74,6 +74,7 @@ class AudioTrackBridge {
                   JniEnvExt* env = JniEnvExt::Get());
 
   void SetVolume(double volume, JniEnvExt* env = JniEnvExt::Get());
+  void SetPlaybackRate(double playback_rate, JniEnvExt* env = JniEnvExt::Get());
 
   // |updated_at| contains the timestamp when the audio timestamp is updated on
   // return.  It can be nullptr.

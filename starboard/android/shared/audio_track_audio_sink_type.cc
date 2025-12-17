@@ -181,11 +181,8 @@ AudioTrackAudioSink::~AudioTrackAudioSink() {
 
 void AudioTrackAudioSink::SetPlaybackRate(double playback_rate) {
   SB_DCHECK_GE(playback_rate, 0.0);
-  if (playback_rate != 0.0 && playback_rate != 1.0) {
-    SB_NOTIMPLEMENTED() << "TODO: Only playback rates of 0.0 and 1.0 are "
-                           "currently supported.";
-    playback_rate = (playback_rate > 0.0) ? 1.0 : 0.0;
-  }
+  SB_LOG(INFO) << "Set playback rate to " << playback_rate;
+  bridge_.SetPlaybackRate(playback_rate);
   std::lock_guard lock(mutex_);
   playback_rate_ = playback_rate;
 }
@@ -436,7 +433,7 @@ int AudioTrackAudioSinkType::GetMinBufferSizeInFrames(
 
   return std::max(
       AudioTrackBridge::GetMinBufferSizeInFrames(sample_type, channels,
-                                                 sampling_frequency_hz),
+                                                 sampling_frequency_hz) * 2,
       audio_track_audio_sink_type_->GetMinBufferSizeInFramesInternal(
           channels, sample_type, sampling_frequency_hz));
 }
