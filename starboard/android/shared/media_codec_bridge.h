@@ -210,6 +210,7 @@ class MediaCodecBridge {
   void ReleaseOutputBuffer(jint index, jboolean render);
   void ReleaseOutputBufferAtTimestamp(jint index, jlong render_timestamp_ns);
 
+  void Seek(long timestamp);
   void SetPlaybackRate(double playback_rate);
   bool Restart();
   jint Flush();

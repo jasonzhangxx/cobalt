@@ -505,6 +505,11 @@ void MediaCodecBridge::ReleaseOutputBufferAtTimestamp(
       env, j_media_codec_bridge_, index, render_timestamp_ns);
 }
 
+void MediaCodecBridge::Seek(long timestamp) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_MediaCodecBridge_seekTo(env, j_media_codec_bridge_, timestamp);
+}
+
 void MediaCodecBridge::SetPlaybackRate(double playback_rate) {
   JNIEnv* env = AttachCurrentThread();
   Java_MediaCodecBridge_setPlaybackRate(env, j_media_codec_bridge_,

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 
 #include "starboard/common/check_op.h"
 #include "starboard/common/log.h"
@@ -155,6 +156,31 @@ bool operator!=(const AudioStreamInfo& left, const AudioStreamInfo& right) {
   return !(left == right);
 }
 
+std::ostream& operator<<(std::ostream& os, const AudioStreamInfo& stream_info) {
+  if (stream_info.codec == kSbMediaAudioCodecNone) {
+    return os << "codec: " << GetMediaAudioCodecName(stream_info.codec);
+  }
+
+  os << "codec: " << GetMediaAudioCodecName(stream_info.codec) << ", ";
+  os << "mime: " << stream_info.mime
+     << ", number of channels: " << stream_info.number_of_channels
+     << ", samples per second: " << stream_info.samples_per_second
+     << ", bits per sample: "<<stream_info.bits_per_sample
+     << ", ";
+  if(stream_info.audio_specific_config.size() > 0) {
+    os << "audio specfic data: {";
+    for (size_t i = 0, size = stream_info.audio_specific_config.size(); i < size; ++i) {
+      os << "0x" << std::hex << std::setw(2) << std::setfill('0') << stream_info.audio_specific_config[i];
+      if (i < size - 1) {
+          os << ", ";
+      }
+    }
+    os << '}';
+  }
+  
+  return os;
+}
+
 AudioSampleInfo& AudioSampleInfo::operator=(
     const SbMediaAudioSampleInfo& that) {
   stream_info = that.stream_info;
@@ -233,6 +259,21 @@ bool operator==(const VideoStreamInfo& left, const VideoStreamInfo& right) {
 
 bool operator!=(const VideoStreamInfo& left, const VideoStreamInfo& right) {
   return !(left == right);
+}
+
+std::ostream& operator<<(std::ostream& os, const VideoStreamInfo& stream_info) {
+  if (stream_info.codec == kSbMediaVideoCodecNone) {
+    return os << "codec: " << GetMediaVideoCodecName(stream_info.codec);
+  }
+
+  os << "codec: " << GetMediaVideoCodecName(stream_info.codec) << ", ";
+  os << "mime: " << stream_info.mime
+     << ", max video capabilities: " << stream_info.max_video_capabilities
+     << ", ";
+  os << stream_info.frame_width << 'x' << stream_info.frame_height << ' ';
+  os << '(' << stream_info.color_metadata << ')';
+
+  return os;
 }
 
 VideoSampleInfo& VideoSampleInfo::operator=(

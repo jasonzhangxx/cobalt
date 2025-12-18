@@ -16,6 +16,7 @@
 #define STARBOARD_ANDROID_SHARED_VIDEO_WINDOW_H_
 
 #include <android/native_window.h>
+#include <functional>
 #include <jni.h>
 
 namespace starboard::android::shared {
@@ -31,9 +32,6 @@ class VideoSurfaceHolder {
   // ClearVideoWindow() in this function may cause dead lock.
   virtual void OnSurfaceDestroyed() = 0;
 
- protected:
-  ~VideoSurfaceHolder() {}
-
   // Returns the surface which video should be rendered. Surface cannot be
   // acquired before last holder release the surface.
   jobject AcquireVideoSurface();
@@ -41,12 +39,32 @@ class VideoSurfaceHolder {
   // Release the surface to make the surface available for other holder.
   void ReleaseVideoSurface();
 
+ protected:
+  virtual ~VideoSurfaceHolder();
+
   // Get the native window size. Return false if don't have available native
   // window.
   bool GetVideoWindowSize(int* width, int* height);
 
   // Clear the video window by painting it Black.
   void ClearVideoWindow(bool force_reset_surface);
+};
+
+class CallbackVideoSurfaceHolder : public VideoSurfaceHolder {
+ public:
+  using OnSurfaceDestroyedCallback = std::function<void()>;
+
+  CallbackVideoSurfaceHolder(OnSurfaceDestroyedCallback callback)
+      : callback_(callback) {}
+
+  void OnSurfaceDestroyed() override {
+    if (callback_) {
+      callback_();
+    }
+  }
+
+ private:
+  OnSurfaceDestroyedCallback callback_;
 };
 
 }  // namespace starboard::android::shared
