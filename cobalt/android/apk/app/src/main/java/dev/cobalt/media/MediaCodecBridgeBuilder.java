@@ -59,7 +59,7 @@ class MediaCodecBridgeBuilder {
             mediaCodec,
             mime,
             MediaCodecBridge.BitrateAdjustmentTypes.NO_ADJUSTMENT,
-            -1);
+            null);
 
     byte[][] csds = {};
     boolean frameHasAdtsHeader = false;

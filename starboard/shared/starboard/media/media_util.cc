@@ -235,6 +235,21 @@ bool operator!=(const VideoStreamInfo& left, const VideoStreamInfo& right) {
   return !(left == right);
 }
 
+std::ostream& operator<<(std::ostream& os, const VideoStreamInfo& stream_info) {
+  if (stream_info.codec == kSbMediaVideoCodecNone) {
+    return os << "codec: " << GetMediaVideoCodecName(stream_info.codec);
+  }
+
+  os << "codec: " << GetMediaVideoCodecName(stream_info.codec) << ", ";
+  os << "mime: " << stream_info.mime
+     << ", max video capabilities: " << stream_info.max_video_capabilities
+     << ", ";
+  os << stream_info.frame_width << 'x' << stream_info.frame_height << ' ';
+  os << '(' << stream_info.color_metadata << ')';
+
+  return os;
+}
+
 VideoSampleInfo& VideoSampleInfo::operator=(
     const SbMediaVideoSampleInfo& that) {
   stream_info = that.stream_info;

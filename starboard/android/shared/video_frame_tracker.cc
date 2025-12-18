@@ -120,6 +120,14 @@ void VideoFrameTracker::Seek(int64_t seek_to_time) {
   seek_to_time_ = seek_to_time;
 }
 
+int VideoFrameTracker::GetNumberPendingFrames() {
+  SB_DCHECK(thread_checker_.CalledOnValidThread());
+
+  UpdateDroppedFrames();
+
+  return frames_to_be_rendered_.size();
+}
+
 int VideoFrameTracker::UpdateAndGetDroppedFrames() {
   SB_DCHECK(thread_checker_.CalledOnValidThread());
   UpdateDroppedFrames();

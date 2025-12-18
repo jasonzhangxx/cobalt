@@ -17,6 +17,7 @@
 
 #include <list>
 #include <mutex>
+#include <set>
 #include <vector>
 
 #include "starboard/shared/starboard/thread_checker.h"
@@ -31,21 +32,34 @@ class VideoFrameTracker {
   int64_t seek_to_time() const;
 
   void OnInputBuffer(int64_t timestamp);
-
+  void OnFrameEnququed(int64_t frame_timestamp);
+  void OnFrameDecoded(int64_t frame_timestamp);  // TODO: currently not used
   void OnFrameRendered(int64_t frame_timestamp);
 
   void Seek(int64_t seek_to_time);
-
+  int GetNumberPendingFrames();
   int UpdateAndGetDroppedFrames();
 
  private:
+  struct FrameRecord {
+    enum State {
+      kWaiting,
+      kEnqueued,
+      kDecoded,
+      kRendered,
+    };
+
+    int64_t frame_pts;
+    State frame_state;
+  };
+
   void UpdateDroppedFrames();
 
   ::starboard::shared::starboard::ThreadChecker thread_checker_;
+  const int max_pending_frames_size_;
 
   std::list<int64_t> frames_to_be_rendered_;
 
-  const int max_pending_frames_size_;
   int dropped_frames_ = 0;
   int64_t seek_to_time_ = 0;  // microseconds
 

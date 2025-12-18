@@ -60,14 +60,14 @@ class MediaCodecBridge {
   private long mNativeMediaCodecBridge;
   private final SynchronizedHolder<MediaCodec, IllegalStateException> mMediaCodec =
       new SynchronizedHolder<>(() -> new IllegalStateException("MediaCodec was destroyed"));
+  private TunneledPlaybackAdapter mTunneledPlaybackAdapter = null;
 
   private MediaCodec.Callback mCallback;
+  private MediaCodec.OnFrameRenderedListener mFrameRendererListener;
+  private TunneledPlaybackAdapter.VideoTunnelCallbacks mTunneledPlaybackListener;
+
   private double mPlaybackRate = 1.0;
   private int mFps = 30;
-  private final boolean mIsTunnelingPlayback;
-
-  private MediaCodec.OnFrameRenderedListener mFrameRendererListener;
-  private MediaCodec.OnFirstTunnelFrameReadyListener mFirstTunnelFrameReadyListener;
 
   // Functions that require this will be called frequently in a tight loop.
   // Only create one of these and reuse it to avoid excessive allocations,
@@ -400,18 +400,199 @@ class MediaCodecBridge {
     }
   }
 
+  // TODO: remove static after moving it to a seperte file
+  private static class TunneledPlaybackAdapter {
+    private enum AdapterType {
+        TunneledPlaybackDefault,
+        VideoTunnel,
+        VideoTunnelBackported,
+    }
+
+    public static final String PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_PLAY = "video_tunnel_function.play"; // value type boolean
+    public static final String PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_PAUSE = "video_tunnel_function.pause"; // value type boolean
+    public static final String PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SEEK_TO_PTS = "video_tunnel_function.seek_to.pts"; // value type long
+    public static final String PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SEEK_TO_IS_PRECISE = "video_tunnel_function.seek_to.is_precise"; // value type boolean
+    public static final String PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SET_SPEED = "video_tunnel_function.set_speed"; // value type float
+    public static final String PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SET_SYNC_MODE = "video_tunnel_function.set_sync_mode.sync_mode"; // value type enum (int)
+    public static final String PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_GET_CURRENT_RENDERED_PTS = "video_tunnel_function.get_current_rendered_pts"; // value type long
+
+    public static interface VideoTunnelCallbacks {
+      // OnFirstTunnelFrameReady
+      void onFirstTunnelFrameReady(MediaCodec codec);
+
+      // VideoTunnelCallback
+      // void onSetSpeedDone(Float speed);
+      // void onSetSpeedFailed(Float maxSupportedAudioSpeed, Float maxSupportedVideoSpeed);
+      // void onSetSyncModeDone(SyncMode syncMode, PlaybackState playbackState, float speed);
+      // void onSetSyncModeFailed(SyncMode syncMode, String errorMessage);
+      // void onStreamInfoChanged(StreamInfo streamInfo);
+      // void onPaused(long currentRenderedPTS);
+    }
+
+    private AdapterType mAdapterType = AdapterType.TunneledPlaybackDefault;
+    private int mAudioSessionId = -1;
+    private VideoTunnelCallbacks mVideoTunnelCallbacks = null;
+    private long mSeekToPTS = 0;
+
+    private MediaCodec.OnFirstTunnelFrameReadyListener mFirstTunnelFrameReadyListener;
+
+
+    private static boolean isDecodeOnlyFlagSupported() {
+      // BUFFER_FLAG_DECODE_ONLY is added in Android 14.
+      return Build.VERSION.SDK_INT >= 34;
+    }
+
+    public static TunneledPlaybackAdapter createTunneledPlaybackAdapter(int audioSessionId) {
+      // TODO: feature switch handling, 1. disable TM2, 2. disable TM2 native, 3. disable TM
+      TunneledPlaybackAdapter TunneledPlaybackAdapter = new TunneledPlaybackAdapter(audioSessionId);
+      return TunneledPlaybackAdapter;
+    }
+
+    private TunneledPlaybackAdapter(int audioSessionId) {
+      mAudioSessionId = audioSessionId;
+    }
+
+    public void configureVideo(MediaCodec mediaCodec,
+                MediaFormat format,
+                Surface surface,
+                MediaCrypto crypto,
+                int flags) {
+
+      //TODO: support TM2
+      format.setFeatureEnabled(CodecCapabilities.FEATURE_TunneledPlayback, true);
+      format.setInteger(MediaFormat.KEY_AUDIO_SESSION_ID, mAudioSessionId);
+      format.setInteger(MediaFormat.KEY_PUSH_BLANK_BUFFERS_ON_STOP, 1);
+      Log.d(TAG, "Enabled tunnel mode playback on audio session " + mAudioSessionId);
+
+      mediaCodec.configure(format, surface, crypto, flags);
+    }
+
+    public void setupTunnelingPlayback(MediaCodec mediaCodec, VideoTunnelCallbacks callbacks) {
+      mVideoTunnelCallbacks = callbacks;
+
+      // PARAMETER_KEY_TUNNEL_PEEK is added in Android 12.
+      if (Build.VERSION.SDK_INT >= 31) {
+        // |PARAMETER_KEY_TUNNEL_PEEK| should be default to enabled according to the API
+        // documentation, but some devices don't adhere to the documentation and we need to set the
+        // parameter explicitly.
+        Bundle bundle = new Bundle();
+        bundle.putInt(MediaCodec.PARAMETER_KEY_TUNNEL_PEEK, 1);
+        try {
+          mediaCodec.setParameters(bundle);
+        } catch (IllegalStateException e) {
+          Log.e(TAG, "Failed to set MediaCodec PARAMETER_KEY_TUNNEL_PEEK: ", e);
+        }
+      } else {
+        Log.w(
+            TAG,
+            "MediaCodec PARAMETER_KEY_TUNNEL_PEEK is not supported in SDK version < 31: SDK version="
+                + Build.VERSION.SDK_INT);
+      }
+
+      // OnFirstTunnelFrameReadyListener is added in Android 12.
+      if (Build.VERSION.SDK_INT >= 31) {
+        mFirstTunnelFrameReadyListener =
+            new MediaCodec.OnFirstTunnelFrameReadyListener() {
+              @Override
+              public void onFirstTunnelFrameReady(MediaCodec codec) {
+                mVideoTunnelCallbacks.onFirstTunnelFrameReady(codec);
+              }
+            };
+        mediaCodec.setOnFirstTunnelFrameReadyListener(null, mFirstTunnelFrameReadyListener);
+      } else {
+        Log.w(
+            TAG,
+            "MediaCodec OnFirstTunnelFrameReadyListener is not supported in SDK version < 31: SDK"
+                + " version="
+                + Build.VERSION.SDK_INT);
+      }
+
+      // TODO: setup VideoTunnelCallbacks for A17.
+    }
+
+    private int applyDecodeOnlyIfNeeded(long presentationTimeUs, int flags) {
+      if (isDecodeOnlyFlagSupported()
+          && mAdapterType == AdapterType.TunneledPlaybackDefault
+          && (flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0
+          && presentationTimeUs < mSeekToPTS) {
+        return flags | MediaCodec.BUFFER_FLAG_DECODE_ONLY;
+      }
+      return flags;
+    }
+
+    public void queueInputBuffer(MediaCodec codec,
+                    int index,
+                    int offset,
+                    int size,
+                    long presentationTimeUs,
+                    int flags) {
+      codec.queueInputBuffer(index, offset, size, presentationTimeUs,
+        applyDecodeOnlyIfNeeded(presentationTimeUs,flags));
+    }
+
+    public void queueSecureInputBuffer(MediaCodec codec,
+                int index,
+                int offset,
+                MediaCodec.CryptoInfo info,
+                long presentationTimeUs,
+                int flags) {
+      codec.queueSecureInputBuffer(index, offset, info, presentationTimeUs,
+        applyDecodeOnlyIfNeeded(presentationTimeUs,flags));
+    }
+
+    public void onOutputFormatChanged(MediaCodec codec, MediaFormat format) {
+      // TODO: twist callback for backported TM2
+    }
+
+    public void seekTo(MediaCodec mediaCodec, long seekTo) {
+      mSeekToPTS = seekTo;
+
+      if(mAdapterType == AdapterType.VideoTunnelBackported) {
+        Bundle b = new Bundle();
+        b.putFloat(PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SEEK_TO_PTS, seekTo);
+        mediaCodec.setParameters(b);
+
+        Log.w(TAG, "VideoTunnel seekTo" + seekTo);
+      }
+      // TODO: support A17
+    }
+
+    // public void play(MediaCodec mediaCodec) {
+    //   // TODO: call VT.play()
+    // }
+
+    // public void pause(MediaCodec mediaCodec) {
+    //   // TODO: call VT.pause()
+    // }
+
+    public void setSpeed(MediaCodec mediaCodec, double playbackRate) {
+      if(mAdapterType == AdapterType.VideoTunnelBackported) {
+        Bundle b = new Bundle();
+        b.putFloat(PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SET_SPEED, (float)playbackRate);
+        mediaCodec.setParameters(b);
+
+        Log.w(TAG, "VideoTunnel setSpeed" + playbackRate);
+      }
+      // TODO: support A17
+    }
+
+    // public void setSyncMode(MediaCodec mediaCodec) {
+    //   // TODO: call VT.setSyncMode()
+    // }
+  }
+
   public MediaCodecBridge(
       long nativeMediaCodecBridge,
       MediaCodec mediaCodec,
       String mime,
       BitrateAdjustmentTypes bitrateAdjustmentType,
-      int tunnelModeAudioSessionId) {
+      TunneledPlaybackAdapter tunneledPlaybackAdapter) {
     if (mediaCodec == null) {
       throw new IllegalArgumentException();
     }
     mNativeMediaCodecBridge = nativeMediaCodecBridge;
     mMediaCodec.set(mediaCodec);
-    mIsTunnelingPlayback = tunnelModeAudioSessionId != -1;
+    mTunneledPlaybackAdapter = tunneledPlaybackAdapter;
     mCallback =
         new MediaCodec.Callback() {
           @Override
@@ -481,7 +662,8 @@ class MediaCodecBridge {
         };
     mMediaCodec.get().setCallback(mCallback);
 
-    if (isFrameRenderedCallbackEnabled() || mIsTunnelingPlayback) {
+    // When tunnel mode is used, we have to rely on frame rendered callback to know dropped frames.
+    if (isFrameRenderedCallbackEnabled() || mTunneledPlaybackAdapter != null) {
       mFrameRendererListener =
           new MediaCodec.OnFrameRenderedListener() {
             @Override
@@ -499,8 +681,20 @@ class MediaCodecBridge {
       mMediaCodec.get().setOnFrameRenderedListener(mFrameRendererListener, null);
     }
 
-    if (mIsTunnelingPlayback) {
-      setupTunnelingPlayback();
+    if(mTunneledPlaybackAdapter != null) {
+      mTunneledPlaybackListener = new TunneledPlaybackAdapter.VideoTunnelCallbacks() {
+        @Override
+        public void onFirstTunnelFrameReady(MediaCodec codec) {
+          synchronized (mNativeBridgeLock) {
+            if (mNativeMediaCodecBridge == 0) {
+              return;
+            }
+            MediaCodecBridgeJni.get()
+                .onMediaCodecFirstTunnelFrameReady(mNativeMediaCodecBridge);
+          }
+        }
+      };
+      mTunneledPlaybackAdapter.setupTunnelingPlayback(mMediaCodec.get(), mTunneledPlaybackListener);
     }
   }
 
@@ -508,16 +702,6 @@ class MediaCodecBridge {
   public static boolean isFrameRenderedCallbackEnabled() {
     // Starting with Android 14, onFrameRendered should be called accurately for each rendered
     // frame.
-    return Build.VERSION.SDK_INT >= 34;
-  }
-
-  @CalledByNative
-  private boolean isDecodeOnlyFlagEnabled() {
-    // Right now, we only enable BUFFER_FLAG_DECODE_ONLY for tunneling playback.
-    if (!mIsTunnelingPlayback) {
-      return false;
-    }
-    // BUFFER_FLAG_DECODE_ONLY is added in Android 14.
     return Build.VERSION.SDK_INT >= 34;
   }
 
@@ -587,13 +771,20 @@ class MediaCodecBridge {
       return;
     }
 
+    // TODO: create and initialize TunneledPlaybackAdapter
+    TunneledPlaybackAdapter tunneledPlaybackAdapter = null;
+    if(tunnelModeAudioSessionId != -1) {
+      tunneledPlaybackAdapter = TunneledPlaybackAdapter.createTunneledPlaybackAdapter(tunnelModeAudioSessionId);
+    }
+
     MediaCodecBridge bridge =
         new MediaCodecBridge(
             nativeMediaCodecBridge,
             mediaCodec,
             mime,
             BitrateAdjustmentTypes.NO_ADJUSTMENT,
-            tunnelModeAudioSessionId);
+            tunneledPlaybackAdapter);
+
     MediaFormat mediaFormat =
         createVideoDecoderFormat(mime, widthHint, heightHint, videoCapabilities);
 
@@ -608,12 +799,6 @@ class MediaCodecBridge {
         mediaFormat.setInteger(MediaFormat.KEY_COLOR_RANGE, colorInfo.colorRange);
       }
       mediaFormat.setByteBuffer(MediaFormat.KEY_HDR_STATIC_INFO, colorInfo.hdrStaticInfo);
-    }
-
-    if (tunnelModeAudioSessionId != -1) {
-      mediaFormat.setFeatureEnabled(CodecCapabilities.FEATURE_TunneledPlayback, true);
-      mediaFormat.setInteger(MediaFormat.KEY_AUDIO_SESSION_ID, tunnelModeAudioSessionId);
-      Log.d(TAG, "Enabled tunnel mode playback on audio session " + tunnelModeAudioSessionId);
     }
 
     if (maxWidth > 0 && maxHeight > 0) {
@@ -719,14 +904,37 @@ class MediaCodecBridge {
       // outCreateMediaCodecBridgeResult.mErrorMessage is set inside configureVideo() on error.
       return;
     }
-    if (!bridge.start(outCreateMediaCodecBridgeResult)) {
-      Log.e(TAG, "Failed to start video codec.");
-      bridge.release();
-      // outCreateMediaCodecBridgeResult.mErrorMessage is set inside start() on error.
-      return;
+
+    // TODO: Move start out of creataion to avoid callbacks before MediaCodecBridge instance is sent back.
+    if(tunnelModeAudioSessionId == -1) {
+      if (!bridge.start(outCreateMediaCodecBridgeResult)) {
+        Log.e(TAG, "Failed to start video codec.");
+        bridge.release();
+        // outCreateMediaCodecBridgeResult.mErrorMessage is set inside start() on error.
+        return;
+      }
     }
 
     outCreateMediaCodecBridgeResult.mMediaCodecBridge = bridge;
+  }
+
+  @CalledByNative
+  private void seekTo(long seekTo) {
+    if(mTunneledPlaybackAdapter == null) {
+      Log.e(TAG, "VideoTunnelSeekTo is called by non tunnel pipeline");
+      return;
+    }
+    try {
+      mTunneledPlaybackAdapter.seekTo(mMediaCodec.get(), seekTo);
+    } catch (Exception e) {
+      Log.e(TAG, "Failed to call VideoTunnel.seekTo", e);
+      MediaCodecBridgeJni.get()
+          .onMediaCodecError(
+              mNativeMediaCodecBridge,
+              false,
+              false,
+              "Failed to call VideoTunnel.seekTo: " + e);
+    }
   }
 
   @CalledByNative
@@ -743,6 +951,7 @@ class MediaCodecBridge {
     mMediaCodec.set(null);
   }
 
+  //TODO: combine start() and restart().
   public boolean start() {
     return start(null);
   }
@@ -776,6 +985,19 @@ class MediaCodecBridge {
     mPlaybackRate = playbackRate;
     if (mFrameRateEstimator != null) {
       updateOperatingRate();
+    }
+    if(mTunneledPlaybackAdapter != null) {
+      try {
+        mTunneledPlaybackAdapter.setSpeed(mMediaCodec.get(), playbackRate);
+      } catch (Exception e) {
+        Log.e(TAG, "Failed to call VideoTunnel.setSpeed", e);
+        MediaCodecBridgeJni.get()
+            .onMediaCodecError(
+                mNativeMediaCodecBridge,
+                false,
+                false,
+                "Failed to call VideoTunnel.setSpeed: " + e);
+      }
     }
   }
 
@@ -885,12 +1107,13 @@ class MediaCodecBridge {
   private int queueInputBuffer(
       int index, int offset, int size, long presentationTimeUs, int flags, boolean is_decode_only) {
     try {
-      if (isDecodeOnlyFlagEnabled()
-          && is_decode_only
-          && (flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0) {
-        flags |= MediaCodec.BUFFER_FLAG_DECODE_ONLY;
+      if(mTunneledPlaybackAdapter != null) {
+        // Tunneled playback doesn't rely on |is_decode_only| parameter to determine if the frame should be displayed.
+        mTunneledPlaybackAdapter.queueInputBuffer(mMediaCodec.get(), index, offset, size, presentationTimeUs, flags);
       }
-      mMediaCodec.get().queueInputBuffer(index, offset, size, presentationTimeUs, flags);
+      else {
+        mMediaCodec.get().queueInputBuffer(index, offset, size, presentationTimeUs, flags);
+      }
     } catch (Exception e) {
       Log.e(TAG, "Failed to queue input buffer", e);
       return MediaCodecStatus.ERROR;
@@ -924,14 +1147,15 @@ class MediaCodecBridge {
         return MediaCodecStatus.ERROR;
       }
 
-      int flags = 0;
-      if (isDecodeOnlyFlagEnabled() && is_decode_only) {
-        flags |= MediaCodec.BUFFER_FLAG_DECODE_ONLY;
+      if(mTunneledPlaybackAdapter != null) {
+        // Tunneled playback doesn't rely on |is_decode_only| parameter to determine if the frame should be displayed.
+        mTunneledPlaybackAdapter.queueSecureInputBuffer(mMediaCodec.get(), index, offset, cryptoInfo, presentationTimeUs, 0);
       }
-
-      mMediaCodec
+      else {
+        mMediaCodec
           .get()
-          .queueSecureInputBuffer(index, offset, cryptoInfo, presentationTimeUs, flags);
+          .queueSecureInputBuffer(index, offset, cryptoInfo, presentationTimeUs, 0);
+      }
     } catch (MediaCodec.CryptoException e) {
       int errorCode = e.getErrorCode();
       if (errorCode == MediaCodec.CryptoException.ERROR_NO_KEY) {
@@ -1005,8 +1229,14 @@ class MediaCodecBridge {
       }
 
       maybeSetMaxVideoInputSize(format);
-      mMediaCodec.get().configure(format, surface, crypto, flags);
       mFrameRateEstimator = new FrameRateEstimator();
+
+      if(mTunneledPlaybackAdapter != null) {
+        mTunneledPlaybackAdapter.configureVideo(mMediaCodec.get(), format, surface, crypto, flags);
+      }
+      else {
+        mMediaCodec.get().configure(format, surface, crypto, flags);
+      }
       return true;
     } catch (IllegalArgumentException e) {
       Log.e(TAG, "Cannot configure the video codec with IllegalArgumentException: ", e);
@@ -1110,51 +1340,6 @@ class MediaCodecBridge {
     }
   }
 
-  private void setupTunnelingPlayback() {
-    // PARAMETER_KEY_TUNNEL_PEEK is added in Android 12.
-    if (Build.VERSION.SDK_INT >= 31) {
-      // |PARAMETER_KEY_TUNNEL_PEEK| should be default to enabled according to the API
-      // documentation, but some devices don't adhere to the documentation and we need to set the
-      // parameter explicitly.
-      Bundle bundle = new Bundle();
-      bundle.putInt(MediaCodec.PARAMETER_KEY_TUNNEL_PEEK, 1);
-      try {
-        mMediaCodec.get().setParameters(bundle);
-      } catch (IllegalStateException e) {
-        Log.e(TAG, "Failed to set MediaCodec PARAMETER_KEY_TUNNEL_PEEK: ", e);
-      }
-    } else {
-      Log.w(
-          TAG,
-          "MediaCodec PARAMETER_KEY_TUNNEL_PEEK is not supported in SDK version < 31: SDK version="
-              + Build.VERSION.SDK_INT);
-    }
-
-    // OnFirstTunnelFrameReadyListener is added in Android 12.
-    if (Build.VERSION.SDK_INT >= 31) {
-      mFirstTunnelFrameReadyListener =
-          new MediaCodec.OnFirstTunnelFrameReadyListener() {
-            @Override
-            public void onFirstTunnelFrameReady(MediaCodec codec) {
-              synchronized (mNativeBridgeLock) {
-                if (mNativeMediaCodecBridge == 0) {
-                  return;
-                }
-                MediaCodecBridgeJni.get()
-                    .OnMediaCodecFirstTunnelFrameReady(mNativeMediaCodecBridge);
-              }
-            }
-          };
-      mMediaCodec.get().setOnFirstTunnelFrameReadyListener(null, mFirstTunnelFrameReadyListener);
-    } else {
-      Log.w(
-          TAG,
-          "MediaCodec OnFirstTunnelFrameReadyListener is not supported in SDK version < 31: SDK"
-              + " version="
-              + Build.VERSION.SDK_INT);
-    }
-  }
-
   @CalledByNative
   public boolean configureAudio(MediaFormat format, MediaCrypto crypto, int flags) {
     try {
@@ -1190,6 +1375,6 @@ class MediaCodecBridge {
     void onMediaCodecFrameRendered(
         long mediaCodecBridge, long presentationTimeUs, long renderAtSystemTimeNs);
 
-    void OnMediaCodecFirstTunnelFrameReady(long mediaCodecBridge);
+    void onMediaCodecFirstTunnelFrameReady(long mediaCodecBridge);
   }
 }

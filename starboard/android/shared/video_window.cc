@@ -29,7 +29,6 @@
 #include "starboard/shared/gles/gl_call.h"
 
 namespace starboard::android::shared {
-
 namespace {
 
 // Global video surface pointer mutex.
@@ -86,8 +85,16 @@ bool VideoSurfaceHolder::IsVideoSurfaceAvailable() {
   return !g_video_surface_holder && g_j_video_surface;
 }
 
+VideoSurfaceHolder::~VideoSurfaceHolder() {
+  // Ensure the surface is released by the instance.
+  ReleaseVideoSurface();
+}
+
 jobject VideoSurfaceHolder::AcquireVideoSurface() {
   std::lock_guard lock(*GetViewSurfaceMutex());
+  if (g_video_surface_holder == this) {
+    return g_j_video_surface;
+  }
   if (g_video_surface_holder != NULL) {
     return NULL;
   }
