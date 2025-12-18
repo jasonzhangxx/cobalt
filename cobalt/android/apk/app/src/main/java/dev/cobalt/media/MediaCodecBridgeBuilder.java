@@ -56,7 +56,7 @@ class MediaCodecBridgeBuilder {
         new MediaCodecBridge(
             nativeMediaCodecBridge,
             mediaCodec,
-            -1);
+            null);
 
     byte[][] csds = {};
     boolean frameHasAdtsHeader = false;

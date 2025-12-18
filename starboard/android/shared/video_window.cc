@@ -22,13 +22,12 @@
 
 #include <mutex>
 
+#include "cobalt/android/jni_headers/VideoSurfaceView_jni.h"
 #include "starboard/android/shared/starboard_bridge.h"
 #include "starboard/common/log.h"
 #include "starboard/common/once.h"
 #include "starboard/configuration.h"
 #include "starboard/shared/gles/gl_call.h"
-
-#include "cobalt/android/jni_headers/VideoSurfaceView_jni.h"
 
 namespace starboard {
 
@@ -87,8 +86,16 @@ bool VideoSurfaceHolder::IsVideoSurfaceAvailable() {
   return !g_video_surface_holder && g_j_video_surface;
 }
 
+VideoSurfaceHolder::~VideoSurfaceHolder() {
+  // Ensure the surface is released by the instance.
+  ReleaseVideoSurface();
+}
+
 jobject VideoSurfaceHolder::AcquireVideoSurface() {
   std::lock_guard lock(*GetViewSurfaceMutex());
+  if (g_video_surface_holder == this) {
+    return g_j_video_surface;
+  }
   if (g_video_surface_holder != NULL) {
     return NULL;
   }

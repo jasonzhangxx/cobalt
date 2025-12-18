@@ -29,6 +29,7 @@
 #include "starboard/android/shared/media_capabilities_cache.h"
 #include "starboard/android/shared/media_common.h"
 #include "starboard/android/shared/video_decoder.h"
+#include "starboard/android/shared/video_renderer_tunnel.h"
 #include "starboard/common/check_op.h"
 #include "starboard/common/log.h"
 #include "starboard/common/media.h"
@@ -40,6 +41,7 @@
 #include "starboard/shared/starboard/media/mime_type.h"
 #include "starboard/shared/starboard/player/filter/adaptive_audio_decoder_internal.h"
 #include "starboard/shared/starboard/player/filter/audio_decoder_internal.h"
+#include "starboard/shared/starboard/player/filter/audio_renderer_internal_pcm.h"
 #include "starboard/shared/starboard/player/filter/audio_renderer_sink.h"
 #include "starboard/shared/starboard/player/filter/audio_renderer_sink_impl.h"
 #include "starboard/shared/starboard/player/filter/player_components.h"
@@ -157,6 +159,25 @@ class PlayerComponentsPassthrough : public PlayerComponents {
   std::unique_ptr<AudioRendererPassthrough> audio_renderer_;
   std::unique_ptr<VideoRenderer> video_renderer_;
 };
+
+class PlayerComponentsTunnel : public PlayerComponents {
+ public:
+  PlayerComponentsTunnel(std::unique_ptr<AudioRendererPcm> audio_renderer,
+                         std::unique_ptr<TunnelVideoRenderer> video_renderer)
+      : audio_renderer_(std::move(audio_renderer)),
+        video_renderer_(std::move(video_renderer)) {}
+
+ private:
+  // PlayerComponents methods
+  MediaTimeProvider* GetMediaTimeProvider() override {
+    return audio_renderer_.get();
+  }
+  AudioRenderer* GetAudioRenderer() override { return audio_renderer_.get(); }
+  VideoRenderer* GetVideoRenderer() override { return video_renderer_.get(); }
+
+  std::unique_ptr<AudioRendererPcm> audio_renderer_;
+  std::unique_ptr<TunnelVideoRenderer> video_renderer_;
+};
 }  // namespace
 
 class PlayerComponentsFactory : public PlayerComponents::Factory {
@@ -167,10 +188,67 @@ class PlayerComponentsFactory : public PlayerComponents::Factory {
     return (value + alignment - 1) / alignment * alignment;
   }
 
+  NonNullResult<std::unique_ptr<PlayerComponents>> CreateTunnelComponents(
+      const CreationParameters& creation_parameters) {
+    std::unique_ptr<AudioDecoder> audio_decoder;
+    std::unique_ptr<AudioRendererSink> audio_renderer_sink;
+
+    int tunnel_mode_audio_session_id =
+        GenerateAudioSessionId(creation_parameters);
+    SB_LOG(INFO) << "Create tunnel mode pipeline with audio session id "
+                 << tunnel_mode_audio_session_id << '.';
+
+    auto decoder_creator =
+        [](const AudioStreamInfo& audio_stream_info,
+           SbDrmSystem drm_system) -> std::unique_ptr<AudioDecoder> {
+      if (audio_stream_info.codec == kSbMediaAudioCodecAac ||
+          audio_stream_info.codec == kSbMediaAudioCodecOpus) {
+        auto audio_decoder_impl = std::make_unique<MediaCodecAudioDecoder>(
+            audio_stream_info, drm_system, true);
+        if (audio_decoder_impl->is_valid()) {
+          return audio_decoder_impl;
+        }
+      } else {
+        SB_LOG(ERROR) << "Unsupported audio codec " << audio_stream_info.codec;
+      }
+      return nullptr;
+    };
+
+    audio_decoder = std::make_unique<AdaptiveAudioDecoder>(
+        creation_parameters.audio_stream_info(),
+        creation_parameters.drm_system(), decoder_creator, true);
+    audio_renderer_sink = TryToCreateTunnelModeAudioRendererSink(
+        tunnel_mode_audio_session_id, creation_parameters);
+
+    int max_cached_frames, min_frames_per_append;
+    GetAudioRendererParams(creation_parameters, &max_cached_frames,
+                           &min_frames_per_append);
+    std::unique_ptr<AudioRendererPcm> audio_renderer =
+        std::make_unique<AudioRendererPcm>(
+            std::move(audio_decoder), std::move(audio_renderer_sink),
+            creation_parameters.audio_stream_info(), max_cached_frames,
+            min_frames_per_append);
+
+    std::unique_ptr<TunnelVideoRenderer> video_renderer =
+        std::make_unique<TunnelVideoRenderer>(
+            creation_parameters.video_stream_info(),
+            creation_parameters.drm_system(), tunnel_mode_audio_session_id,
+            false, 0);
+
+    return std::make_unique<PlayerComponentsTunnel>(std::move(audio_renderer),
+                                                    std::move(video_renderer));
+  }
+
   NonNullResult<std::unique_ptr<PlayerComponents>> CreateComponents(
       const CreationParameters& creation_parameters) override {
     if (creation_parameters.audio_codec() != kSbMediaAudioCodecAc3 &&
         creation_parameters.audio_codec() != kSbMediaAudioCodecEac3) {
+      // TODO: make it right
+      if (creation_parameters.audio_codec() != kSbMediaAudioCodecNone) {
+        SB_LOG(INFO) << "Creating new tunnel mode components.";
+        return CreateTunnelComponents(creation_parameters);
+      }
+
       SB_LOG(INFO) << "Creating non-passthrough components.";
       return PlayerComponents::Factory::CreateComponents(creation_parameters);
     }
