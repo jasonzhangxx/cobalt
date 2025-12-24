@@ -31,7 +31,7 @@
 #include "starboard/shared/starboard/player/input_buffer_internal.h"
 #include "starboard/shared/starboard/player/job_queue.h"
 
-#define TUNNEL_ENABLE_STATE_LOGGING 1
+#define TUNNEL_ENABLE_STATE_LOGGING 0
 
 namespace starboard::android::shared {
 

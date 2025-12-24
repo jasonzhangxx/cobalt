@@ -191,6 +191,14 @@ public class MediaCodecCapabilitiesLogger {
           return codecCapabilities.isFeatureSupported(
               MediaCodecInfo.CodecCapabilities.FEATURE_TunneledPlayback);
         });
+
+    final String FEATURE_VideoTunnel = "video-tunnel";
+    featureMap.put(
+        "VideoTunnel",
+        (name, codecCapabilities) -> {
+          return codecCapabilities.isFeatureSupported(FEATURE_VideoTunnel);
+        });
+
   }
 
   private static String getAllFeatureNames() {

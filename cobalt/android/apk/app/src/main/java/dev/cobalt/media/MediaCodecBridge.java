@@ -400,6 +400,8 @@ class MediaCodecBridge {
     }
   }
 
+  // TODO: move it to right place
+  public static final String FEATURE_VideoTunnel = "video-tunnel";
   // TODO: remove static after moving it to a seperte file
   private static class TunneledPlaybackAdapter {
     private enum AdapterType {
@@ -429,8 +431,8 @@ class MediaCodecBridge {
       // void onPaused(long currentRenderedPTS);
     }
 
-    private AdapterType mAdapterType = AdapterType.TunneledPlaybackDefault;
-    private int mAudioSessionId = -1;
+    final private AdapterType mAdapterType;
+    final private int mAudioSessionId;
     private VideoTunnelCallbacks mVideoTunnelCallbacks = null;
     private long mSeekToPTS = 0;
 
@@ -442,13 +444,13 @@ class MediaCodecBridge {
       return Build.VERSION.SDK_INT >= 34;
     }
 
-    public static TunneledPlaybackAdapter createTunneledPlaybackAdapter(int audioSessionId) {
-      // TODO: feature switch handling, 1. disable TM2, 2. disable TM2 native, 3. disable TM
-      TunneledPlaybackAdapter TunneledPlaybackAdapter = new TunneledPlaybackAdapter(audioSessionId);
+    public static TunneledPlaybackAdapter createTunneledPlaybackAdapter(AdapterType type, int audioSessionId) {
+      TunneledPlaybackAdapter TunneledPlaybackAdapter = new TunneledPlaybackAdapter(type, audioSessionId);
       return TunneledPlaybackAdapter;
     }
 
-    private TunneledPlaybackAdapter(int audioSessionId) {
+    private TunneledPlaybackAdapter(AdapterType type, int audioSessionId) {
+      mAdapterType = type;
       mAudioSessionId = audioSessionId;
     }
 
@@ -458,8 +460,16 @@ class MediaCodecBridge {
                 MediaCrypto crypto,
                 int flags) {
 
-      //TODO: support TM2
-      format.setFeatureEnabled(CodecCapabilities.FEATURE_TunneledPlayback, true);
+      if(mAdapterType == AdapterType.TunneledPlaybackDefault) {
+        Log.i(TAG, "Enable video feature of tunnel playback.");
+        format.setFeatureEnabled(CodecCapabilities.FEATURE_TunneledPlayback, true);
+      } 
+      else if(mAdapterType == AdapterType.VideoTunnelBackported ||
+         mAdapterType == AdapterType.VideoTunnel) {
+        Log.i(TAG, "Enable video feature of video tunnel.");
+        format.setFeatureEnabled(FEATURE_VideoTunnel, true);
+      }
+
       format.setInteger(MediaFormat.KEY_AUDIO_SESSION_ID, mAudioSessionId);
       format.setInteger(MediaFormat.KEY_PUSH_BLANK_BUFFERS_ON_STOP, 1);
       Log.d(TAG, "Enabled tunnel mode playback on audio session " + mAudioSessionId);
@@ -547,16 +557,16 @@ class MediaCodecBridge {
     public void seekTo(MediaCodec mediaCodec, long seekTo) {
       mSeekToPTS = seekTo;
       if(mAdapterType == AdapterType.TunneledPlaybackDefault) {
-        Log.w(TAG, "Calling VideoTunnel seekTo on non video tunnel playback.");
+        Log.i(TAG, "Calling VideoTunnel seekTo on non video tunnel playback.");
       } 
       else if(mAdapterType == AdapterType.VideoTunnelBackported) {
-        Log.w(TAG, "Calling VideoTunnel seekTo via parameters.");
+        Log.i(TAG, "Calling VideoTunnel seekTo via parameters.");
         Bundle b = new Bundle();
         b.putFloat(PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SEEK_TO_PTS, seekTo);
         mediaCodec.setParameters(b);
       }
       else if(mAdapterType == AdapterType.VideoTunnel) {
-        Log.w(TAG, "Calling VideoTunnel seekTo via VideoTunnel.");
+        Log.i(TAG, "Calling VideoTunnel seekTo via VideoTunnel.");
         // TODO: support A17
       }
     }
@@ -778,7 +788,13 @@ class MediaCodecBridge {
     // TODO: create and initialize TunneledPlaybackAdapter
     TunneledPlaybackAdapter tunneledPlaybackAdapter = null;
     if(tunnelModeAudioSessionId != -1) {
-      tunneledPlaybackAdapter = TunneledPlaybackAdapter.createTunneledPlaybackAdapter(tunnelModeAudioSessionId);
+      TunneledPlaybackAdapter.AdapterType type = TunneledPlaybackAdapter.AdapterType.TunneledPlaybackDefault;
+      if(codecCapabilities.isFeatureSupported(FEATURE_VideoTunnel)) {
+        Log.i(TAG, "Video tunnel is supported.");
+        type = TunneledPlaybackAdapter.AdapterType.VideoTunnelBackported;
+      }
+      // TODO: feature switch handling, 1. disable TM2, 2. disable TM2 native, 3. disable TM
+      tunneledPlaybackAdapter = TunneledPlaybackAdapter.createTunneledPlaybackAdapter(type, tunnelModeAudioSessionId);
     }
 
     MediaCodecBridge bridge =

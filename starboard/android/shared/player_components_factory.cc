@@ -256,6 +256,7 @@ class PlayerComponentsFactory : public starboard::shared::starboard::player::
         int max_cached_frames, min_frames_per_append;
         GetAudioRendererParams(creation_parameters, &max_cached_frames,
                                &min_frames_per_append);
+        //TODO: use AudioRendererTunnel to replace AudioRendererPcm.
         std::unique_ptr<AudioRendererPcm> audio_renderer =
             std::make_unique<AudioRendererPcm>(
                 std::move(audio_decoder), std::move(audio_renderer_sink),
@@ -279,8 +280,9 @@ class PlayerComponentsFactory : public starboard::shared::starboard::player::
 
     if (creation_parameters.audio_codec() != kSbMediaAudioCodecAc3 &&
         creation_parameters.audio_codec() != kSbMediaAudioCodecEac3) {
-      // TODO: make it right
-      if (creation_parameters.audio_codec() != kSbMediaAudioCodecNone) {
+      // TODO: tunnel mode currently only support av playback.
+      if (creation_parameters.audio_codec() != kSbMediaAudioCodecNone && 
+        creation_parameters.video_codec() != kSbMediaVideoCodecNone) {
         SB_LOG(INFO) << "Creating new tunnel mode components.";
         return CreateTunnelComponents(creation_parameters, error_message);
       }

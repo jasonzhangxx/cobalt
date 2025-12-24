@@ -353,7 +353,7 @@ class AsyncMediaCodecInputFeeder {
 
   void TryStartProcessInputJob() {
     SB_DCHECK(job_thread_->BelongsToCurrentThread());
-    
+
     if (process_input_job_token_.is_valid()) {
       // There's already an enqueued process input job.
       return;
@@ -434,8 +434,6 @@ void TunnelVideoRenderer::Initialize(const ErrorCB& error_cb,
   prerolled_cb_ = prerolled_cb;
   ended_cb_ = ended_cb;
 
-  // TODO: hanlde eos and call ended_cb_!!
-
   // Keep the video surface until TunnelVideoRenderer is released.
   video_surface_holder_ = std::make_unique<CallbackVideoSurfaceHolder>(
       std::bind(&TunnelVideoRenderer::ReportError, this,
@@ -514,6 +512,9 @@ void TunnelVideoRenderer::WriteEndOfStream() {
   }
 
   media_codec_feeder_->EnqueueEndOfStream();
+
+  // TODO: hanlde eos and call ended_cb_ properly
+  ended_cb_();
 }
 
 void TunnelVideoRenderer::Seek(int64_t seek_to_time) {
