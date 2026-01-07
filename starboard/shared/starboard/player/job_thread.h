@@ -51,13 +51,13 @@ class JobThread {
                               int64_t delay_usec = 0) {
     SB_DCHECK(job_queue_);
 
-    return job_queue_->Schedule(job, delay_usec);
+    return job_queue_->Schedule(job, this, delay_usec);
   }
 
   JobQueue::JobToken Schedule(JobQueue::Job&& job, int64_t delay_usec = 0) {
     SB_DCHECK(job_queue_);
 
-    return job_queue_->Schedule(std::move(job), delay_usec);
+    return job_queue_->Schedule(std::move(job), this, delay_usec);
   }
 
   void ScheduleAndWait(const JobQueue::Job& job) {
@@ -79,6 +79,12 @@ class JobThread {
     SB_DCHECK(job_queue_);
 
     return job_queue_->RemoveJobByToken(job_token);
+  }
+
+  void CancelPendingJobs() {
+    SB_DCHECK(job_queue_);
+    
+    job_queue_->RemoveJobsByOwner(this);
   }
 
  private:

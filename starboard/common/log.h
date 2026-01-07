@@ -164,8 +164,7 @@ class LogMessageVoidify {
   SB_LOG_IF(FATAL, !(condition)) << "Check failed: " #condition ". "
 #endif  // SB_LOGGING_IS_OFFICIAL_BUILD
 
-#if SB_LOGGING_IS_OFFICIAL_BUILD || \
-    (defined(NDEBUG) && !defined(COBALT_LOGGING_ENABLED))
+#if SB_LOGGING_IS_OFFICIAL_BUILD
 #define SB_DLOG_IS_ON(severity) false
 #define SB_DLOG_IF(severity, condition) SB_EAT_STREAM_PARAMETERS
 #else
@@ -173,8 +172,7 @@ class LogMessageVoidify {
 #define SB_DLOG_IF(severity, condition) SB_LOG_IF(severity, condition)
 #endif
 
-#if SB_LOGGING_IS_OFFICIAL_BUILD || \
-    (defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON))
+#if SB_LOGGING_IS_OFFICIAL_BUILD
 #define SB_DCHECK(condition) SB_EAT_STREAM_PARAMETERS
 #define SB_DCHECK_ENABLED 0
 #else

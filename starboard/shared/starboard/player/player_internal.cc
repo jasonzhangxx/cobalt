@@ -148,6 +148,7 @@ void SbPlayerPrivateImpl::SetBounds(int z_index,
 void SbPlayerPrivateImpl::GetInfo(SbPlayerInfo* out_player_info) {
   SB_DCHECK(out_player_info != NULL);
 
+  //TODO: refine media time reporting, to make it smooth at beginning.
   std::lock_guard lock(mutex_);
   out_player_info->duration = SB_PLAYER_NO_DURATION;
   if (is_paused_ || !is_progressing_) {

@@ -21,6 +21,7 @@ import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTimestamp;
 import android.media.AudioTrack;
+import android.media.PlaybackParams;
 import android.os.Build;
 import androidx.annotation.RequiresApi;
 import dev.cobalt.util.Log;
@@ -136,6 +137,10 @@ public class AudioTrackBridge {
             .build();
 
     int audioTrackBufferSize = preferredBufferSizeInBytes;
+    if(preferredBufferSizeInBytes == 0) {
+      audioTrackBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, sampleType);
+    }
+
     // TODO: Investigate if this implementation could be refined.
     // It is not necessary to loop until 0 since there is new implementation based on
     // AudioTrack.getMinBufferSize(). Especially for tunnel mode, it would fail if audio HAL does
@@ -165,8 +170,18 @@ public class AudioTrackBridge {
       audioTrackBufferSize /= 2;
     }
 
-    String sampleTypeString = "ENCODING_INVALID";
-    if (isAudioTrackValid()) {
+    if(!isAudioTrackValid()) {
+      Log.e(
+          TAG,
+          "Failed to create AudioTrack with sample type %d and buffer size %d (preferred: %d)."
+              + " The minimum buffer size is %d.",
+          sampleType,
+          audioTrackBufferSize,
+          preferredBufferSizeInBytes,
+          AudioTrack.getMinBufferSize(sampleRate, channelConfig, sampleType));
+    }
+    else {
+      String sampleTypeString = "ENCODING_INVALID";
       // If the AudioTrack encoding indicates compressed data,
       // e.g. AudioFormat.ENCODING_AC3, then the frame count returned
       // is the size of the AudioTrack buffer in bytes.
@@ -192,15 +207,15 @@ public class AudioTrackBridge {
           Log.i(TAG, String.format(Locale.US, "Unknown AudioFormat %d.", sampleType));
           break;
       }
+      Log.i(
+          TAG,
+          "AudioTrack created with AudioFormat %s and buffer size %d (preferred: %d)."
+              + " The minimum buffer size is %d.",
+          sampleTypeString,
+          audioTrackBufferSize,
+          preferredBufferSizeInBytes,
+          AudioTrack.getMinBufferSize(sampleRate, channelConfig, sampleType));
     }
-    Log.i(
-        TAG,
-        "AudioTrack created with AudioFormat %s and buffer size %d (preferred: %d)."
-            + " The minimum buffer size is %d.",
-        sampleTypeString,
-        audioTrackBufferSize,
-        preferredBufferSizeInBytes,
-        AudioTrack.getMinBufferSize(sampleRate, channelConfig, sampleType));
   }
 
   public Boolean isAudioTrackValid() {
@@ -224,6 +239,30 @@ public class AudioTrackBridge {
       return 0;
     }
     return audioTrack.setVolume(gain);
+  }
+
+  @SuppressWarnings("unused")
+  @UsedByNative
+  public int setPlaybackRate(float playbackRate) {
+    if (audioTrack == null) {
+      Log.e(TAG, "Unable to setPlaybackRate with NULL audio track.");
+      return 0;
+    }
+    try {
+      // TODO(JA): check if the code below is needed.
+      // audioTrack.setBufferSizeInFrames((int) (defaultBufferSize * playbackRate));
+      PlaybackParams params = audioTrack.getPlaybackParams();
+      params.setSpeed(playbackRate);
+      audioTrack.setPlaybackParams(params);
+    } catch (IllegalArgumentException e) {
+      Log.e(TAG, String.format("Unable to setPlaybackRate, error: %s.", e.toString()));
+      return 0;
+    } catch (IllegalStateException e) {
+      Log.e(TAG, String.format("Unable to setPlaybackRate, error: %s", e.toString()));
+      return 0;
+    }
+    Log.e(TAG, "PlaybackRate is set to "+playbackRate);
+    return 1;
   }
 
   // TODO (b/262608024): Have this method return a boolean and return false on failure.

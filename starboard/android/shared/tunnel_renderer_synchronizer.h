@@ -19,17 +19,12 @@
 #include "starboard/media.h"
 #include "starboard/shared/internal_only.h"
 #include "starboard/shared/starboard/player/filter/media_time_provider.h"
-#include "starboard/shared/starboard/player/job_queue.h"
-
-#define TUNNEL_ENABLE_STATE_LOGGING 1
 
 namespace starboard::android::shared {
 
 using ::starboard::shared::starboard::player::filter::MediaTimeProvider;
-using ::starboard::shared::starboard::player::JobQueue;
 
-class TunnelRendererSynchronizer : public MediaTimeProvider,
-                                   private JobQueue::JobOwner {
+class TunnelRendererSynchronizer : public MediaTimeProvider {
  public:
   TunnelRendererSynchronizer();
   ~TunnelRendererSynchronizer() override;

@@ -488,6 +488,7 @@ void FilterBasedPlayerWorkerHandler::Update() {
     return;
   }
 
+  //TODO: refine media time reporting, to make it smooth at beginning.
   if (get_player_state_cb_() == kSbPlayerStatePresenting) {
     int dropped_frames = 0;
     if (video_renderer_) {
@@ -499,7 +500,7 @@ void FilterBasedPlayerWorkerHandler::Update() {
     double playback_rate;
     auto media_time = media_time_provider_->GetCurrentMediaTime(
         &is_playing, &is_eos_played, &is_underflow, &playback_rate);
-    update_media_info_cb_(media_time, dropped_frames, !is_underflow);
+    update_media_info_cb_(media_time, dropped_frames, is_playing && !is_underflow);
   }
 
   RemoveJobByToken(update_job_token_);

@@ -164,13 +164,13 @@ JobQueue* JobQueue::current() {
 }
 
 JobQueue::JobToken JobQueue::Schedule(const Job& job,
-                                      JobOwner* owner,
+                                      void* owner,
                                       int64_t delay_usec) {
   return Schedule(Job(job), owner, delay_usec);
 }
 
 JobQueue::JobToken JobQueue::Schedule(Job&& job,
-                                      JobOwner* owner,
+                                      void* owner,
                                       int64_t delay_usec) {
   SB_DCHECK(job);
   SB_DCHECK(delay_usec >= 0) << delay_usec;
@@ -202,7 +202,7 @@ JobQueue::JobToken JobQueue::Schedule(Job&& job,
   return job_token;
 }
 
-void JobQueue::RemoveJobsByOwner(JobOwner* owner) {
+void JobQueue::RemoveJobsByOwner(void* owner) {
   SB_DCHECK(BelongsToCurrentThread());
   SB_DCHECK(owner);
 

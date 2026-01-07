@@ -23,6 +23,7 @@
 
 #include "starboard/android/shared/audio_decoder.h"
 #include "starboard/android/shared/audio_renderer_passthrough.h"
+#include "starboard/android/shared/audio_renderer_tunnel.h"
 #include "starboard/android/shared/audio_track_audio_sink_type.h"
 #include "starboard/android/shared/drm_system.h"
 #include "starboard/android/shared/jni_env_ext.h"
@@ -173,8 +174,8 @@ class PlayerComponentsTunnel
  public:
   typedef starboard::shared::starboard::player::filter::AudioRendererPcm AudioRendererPcm;
 
-  PlayerComponentsTunnel(std::unique_ptr<AudioRendererPcm> audio_renderer,
-                         std::unique_ptr<TunnelVideoRenderer> video_renderer)
+  PlayerComponentsTunnel(std::unique_ptr<AudioRendererTunneled> audio_renderer,
+                         std::unique_ptr<VideoRendererTunneled> video_renderer)
       : audio_renderer_(std::move(audio_renderer)),
         video_renderer_(std::move(video_renderer)) {}
 
@@ -186,8 +187,8 @@ class PlayerComponentsTunnel
   AudioRenderer* GetAudioRenderer() override { return audio_renderer_.get(); }
   VideoRenderer* GetVideoRenderer() override { return video_renderer_.get(); }
 
-  std::unique_ptr<AudioRendererPcm> audio_renderer_;
-  std::unique_ptr<TunnelVideoRenderer> video_renderer_;
+  std::unique_ptr<AudioRendererTunneled> audio_renderer_;
+  std::unique_ptr<VideoRendererTunneled> video_renderer_;
 };
 
 class PlayerComponentsFactory : public starboard::shared::starboard::player::
@@ -250,21 +251,28 @@ class PlayerComponentsFactory : public starboard::shared::starboard::player::
         audio_decoder = std::make_unique<AdaptiveAudioDecoder>(
             creation_parameters.audio_stream_info(),
             creation_parameters.drm_system(), decoder_creator, true);
-        audio_renderer_sink = TryToCreateTunnelModeAudioRendererSink(
-            tunnel_mode_audio_session_id, creation_parameters);
 
-        int max_cached_frames, min_frames_per_append;
-        GetAudioRendererParams(creation_parameters, &max_cached_frames,
-                               &min_frames_per_append);
-        //TODO: use AudioRendererTunnel to replace AudioRendererPcm.
-        std::unique_ptr<AudioRendererPcm> audio_renderer =
-            std::make_unique<AudioRendererPcm>(
-                std::move(audio_decoder), std::move(audio_renderer_sink),
-                creation_parameters.audio_stream_info(), max_cached_frames,
-                min_frames_per_append);
+        // audio_renderer_sink = TryToCreateTunnelModeAudioRendererSink(
+        //     tunnel_mode_audio_session_id, creation_parameters);
 
-        std::unique_ptr<TunnelVideoRenderer> video_renderer =
-            std::make_unique<TunnelVideoRenderer>(
+        // int max_cached_frames, min_frames_per_append;
+        // GetAudioRendererParams(creation_parameters, &max_cached_frames,
+        //                        &min_frames_per_append);
+        // //TODO: use AudioRendererTunnel to replace AudioRendererPcm.
+        // std::unique_ptr<AudioRendererPcm> audio_renderer =
+        //     std::make_unique<AudioRendererPcm>(
+        //         std::move(audio_decoder), std::move(audio_renderer_sink),
+        //         creation_parameters.audio_stream_info(), max_cached_frames,
+        //         min_frames_per_append);
+
+        std::unique_ptr<AudioRendererTunneled> audio_renderer =
+            std::make_unique<AudioRendererTunneled>(
+                creation_parameters.audio_stream_info(),
+                std::move(audio_decoder),
+                tunnel_mode_audio_session_id);
+
+        std::unique_ptr<VideoRendererTunneled> video_renderer =
+            std::make_unique<VideoRendererTunneled>(
                 creation_parameters.video_stream_info(),
                 creation_parameters.drm_system(), tunnel_mode_audio_session_id,
                 false, 0);

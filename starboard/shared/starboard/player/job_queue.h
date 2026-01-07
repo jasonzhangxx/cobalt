@@ -45,6 +45,8 @@ class JobQueue {
  public:
   typedef std::function<void()> Job;
 
+  friend class JobThread;
+
   class JobToken {
    public:
     static const int64_t kInvalidToken = -1;
@@ -151,7 +153,7 @@ class JobQueue {
   struct JobRecord {
     JobToken job_token;
     Job job;
-    JobOwner* owner;
+    void* owner;
 #if ENABLE_JOB_QUEUE_PROFILING
     void* stack[kProfileStackDepth];
     int stack_size;
@@ -159,9 +161,9 @@ class JobQueue {
   };
   typedef std::multimap<int64_t, JobRecord> TimeToJobRecordMap;
 
-  JobToken Schedule(const Job& job, JobOwner* owner, int64_t delay_usec);
-  JobToken Schedule(Job&& job, JobOwner* owner, int64_t delay_usec);
-  void RemoveJobsByOwner(JobOwner* owner);
+  JobToken Schedule(const Job& job, void* owner, int64_t delay_usec);
+  JobToken Schedule(Job&& job, void* owner, int64_t delay_usec);
+  void RemoveJobsByOwner(void* owner);
   // Return true if a job is run, otherwise return false.  When there is no job
   // ready to run currently and |wait_for_next_job| is true, the function will
   // wait to until a job is available or if the |queue_| is woken up.  Note that

@@ -17,13 +17,7 @@
 
 #include <atomic>
 #include <functional>
-#include <limits>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <string>
 
-#include "starboard/android/shared/audio_decoder.h"
 #include "starboard/common/log.h"
 #include "starboard/media.h"
 #include "starboard/shared/internal_only.h"
@@ -51,13 +45,24 @@ using ::starboard::shared::starboard::player::JobQueue;
 using ::starboard::shared::starboard::player::InputBuffer;
 using ::starboard::shared::starboard::player::InputBuffers;
 
-class AudioRendererTunnel : public AudioRenderer,
+class AudioTrackWrapper;
+// TODO: move BufferHealth to right place.
+enum class BufferHealth {
+  kUnderrun,  // Buffered data is not enough to keep playing.
+  kLow, //  buffered data < low_watermark
+  kHealthy, // low_watermark <= buffered data <= high_watermark
+  kFull,  // buffered data > high_watermark
+};
+
+class AudioRendererTunneled : public AudioRenderer,
+                            public MediaTimeProvider,
                          private JobQueue::JobOwner {
  public:
-  AudioRendererTunnel(std::unique_ptr<AudioDecoder> decoder,
-                   const AudioStreamInfo& audio_stream_info,
+  //TODO: try writing audio directly into AudioTrack.
+  AudioRendererTunneled(const AudioStreamInfo& audio_stream_info,
+                    std::unique_ptr<::starboard::shared::starboard::player::filter::AudioDecoder> decoder,
                    int tunnel_mode_audio_session_id);
-  ~AudioRendererTunnel() override;
+  ~AudioRendererTunneled() override;
 
   // Audio renderer functions.
   void Initialize(const ErrorCB& error_cb,
@@ -71,32 +76,56 @@ class AudioRendererTunnel : public AudioRenderer,
   bool IsEndOfStreamPlayed() const override;
   bool CanAcceptMoreData() const override;
 
-  void Seek(int64_t seek_to_time);
+  void Play() override;
+  void Pause() override;
+  void SetPlaybackRate(double playback_rate) override;
+  void Seek(int64_t seek_to_time) override;
+  int64_t GetCurrentMediaTime(bool* is_playing,
+                              bool* is_eos_played,
+                              bool* is_underflow,
+                              double* playback_rate) override;
 
  private:
+  void InitializeAudioTrack();
+  void TeardownAudioTrack();
 
+  void TryToSignalPreroll();
+  void UpdateAudioTrackPlayingState();
   void ReportError(const SbPlayerError error, const std::string error_message);
+
+  // Audio decoder callbacks
+  void OnDecoderConsumed();
+  void OnDecoderOutput();
+
+  // AudioTrack callback
+  void OnBufferHealthChanged(BufferHealth buffer_health);
+  void OnEndOfStreamReached();
 
   ErrorCB error_cb_;
   PrerolledCB prerolled_cb_;
   EndedCB ended_cb_;
 
-  std::unique_ptr<AudioDecoder> audio_decoder_;
-  const AudioStreamInfo audio_stream_info_;
+  AudioStreamInfo audio_stream_info_;
   const int tunnel_mode_audio_session_id_;
 
-  // std::unique_ptr<AudioTrackBridge> audio_track_bridge_;
-  // std::unique_ptr<JobThread> audio_track_thread_;
+  std::unique_ptr<::starboard::shared::starboard::player::filter::AudioDecoder> audio_decoder_;
+  std::unique_ptr<AudioTrackWrapper> audio_track_;
 
-  // Our owner will attempt to seek to time 0 when playback begins.  In
-  // general, seeking could require a full reset of the underlying decoder on
-  // some platforms, so we make an effort to improve playback startup
-  // performance by keeping track of whether we already have a fresh decoder,
-  // and can thus avoid doing a full reset.
   bool first_input_written_ = false;
+  bool first_decoded_audio_written_ = false;
   bool end_of_stream_written_ = false;
 
+  bool is_paused_ = true;
+  double playback_rate_ = 1.0;
+  int64_t seeking_to_time_ = 0;  // microseconds
+
+  std::atomic_bool is_seeking_{false};
+  std::atomic_bool end_of_stream_reached_ {false};
   std::atomic_bool has_error_{false};
+
+#if TUNNEL_ENABLE_STATE_LOGGING
+  int64_t seeking_start_at_;  // microseconds
+#endif                        // TUNNEL_ENABLE_STATE_LOGGING
 };
 
 }  // namespace starboard::android::shared

@@ -562,7 +562,7 @@ class MediaCodecBridge {
       else if(mAdapterType == AdapterType.VideoTunnelBackported) {
         Log.i(TAG, "Calling VideoTunnel seekTo via parameters.");
         Bundle b = new Bundle();
-        b.putFloat(PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SEEK_TO_PTS, seekTo);
+        b.putFloat(PARAMETER_KEY_VIDEO_TUNNEL_FUNCTION_SEEK_TO_IS_PRECISE, seekTo);
         mediaCodec.setParameters(b);
       }
       else if(mAdapterType == AdapterType.VideoTunnel) {

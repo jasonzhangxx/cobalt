@@ -105,6 +105,10 @@ void DecodedAudio::ShrinkTo(int new_size_in_bytes) {
   size_in_bytes_ = new_size_in_bytes;
 }
 
+void DecodedAudio::SetTimestamp(int64_t timestamp) {
+  timestamp_ = timestamp;
+}
+
 void DecodedAudio::AdjustForSeekTime(int sample_rate, int64_t seeking_to_time) {
   SB_DCHECK(!is_end_of_stream());
   SB_DCHECK_NE(sample_rate, 0);

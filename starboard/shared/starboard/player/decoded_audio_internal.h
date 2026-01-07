@@ -70,6 +70,7 @@ class DecodedAudio : public RefCountedThreadSafe<DecodedAudio> {
   int frames() const;
 
   void ShrinkTo(int new_size_in_bytes);
+  void SetTimestamp(int64_t timestamp);
 
   // During seeking, the target time can be in the middle of the DecodedAudio
   // object.  This function will adjust the object to the seek target time by

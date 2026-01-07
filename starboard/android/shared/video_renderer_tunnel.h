@@ -18,6 +18,7 @@
 #include <atomic>
 #include <functional>
 
+#include "starboard/android/shared/async_media_codec_input_feeder.h"
 #include "starboard/android/shared/drm_system.h"
 #include "starboard/android/shared/media_codec_bridge.h"
 #include "starboard/android/shared/video_frame_tracker.h"
@@ -35,16 +36,8 @@
 
 namespace starboard::android::shared {
 
-// TODO: move them out
-class AsyncMediaCodecInputFeeder;
-enum class ErrorAction {
-  kRetry,  // Enqueue the current input again
-  kStop,   // Stop the feeder entirely
-};
-
 using ::starboard::shared::starboard::player::filter::VideoRenderer;
 using ::starboard::shared::starboard::media::VideoStreamInfo;
-using ::starboard::shared::starboard::player::InputBuffer;
 using ::starboard::shared::starboard::player::InputBuffers;
 
 using android::shared::DrmSystem;
@@ -59,19 +52,19 @@ using ::starboard::shared::starboard::player::filter::EndedCB;
 
 using ::starboard::shared::starboard::player::JobQueue;
 
-class TunnelVideoRenderer : public VideoRenderer,
+class VideoRendererTunneled : public VideoRenderer,
                             private MediaCodecBridge::Handler,
                             private JobQueue::JobOwner {
  public:
 
   // All of the functions are called on the PlayerWorker thread unless marked
   // otherwise.
-  TunnelVideoRenderer(const VideoStreamInfo& video_stream_info,
+  VideoRendererTunneled(const VideoStreamInfo& video_stream_info,
                       SbDrmSystem drm_system,
                       int tunnel_mode_audio_session_id,
                       bool force_big_endian_hdr_metadata,
                       int max_video_input_size);
-  ~TunnelVideoRenderer() override;
+  ~VideoRendererTunneled() override;
 
   // Video renderer functions
   void Initialize(const ErrorCB& error_cb,
@@ -94,12 +87,11 @@ class TunnelVideoRenderer : public VideoRenderer,
 
   void TryToSignalPreroll();
   void OnSeekTimeout();
-
   void ReportError(const SbPlayerError error, const std::string error_message);
 
   // AsyncMediaCodecInputFeeder callbacks
   void OnInputBufferEnqueued(int64_t timestamp);
-  ErrorAction OnMediaCodecFeederError(MediaCodecStatus status,
+  AsyncMediaCodecInputFeeder::ErrorAction OnMediaCodecFeederError(MediaCodecStatus status,
                                       const std::string& message);
 
   // MediaCodecBridge handler functions
