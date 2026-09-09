@@ -46,6 +46,11 @@ class PLATFORM_EXPORT WebSourceBufferImpl : public WebSourceBuffer {
                         size_t newDataSize) override;
   [[nodiscard]] bool AppendToParseBuffer(
       base::span<const unsigned char> data) override;
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  [[nodiscard]] bool AppendToParseBuffer(
+      base::span<const unsigned char> data,
+      base::ScopedClosureRunner release_runner) override;
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
   [[nodiscard]] media::StreamParser::ParseStatus RunSegmentParserLoop(
       double* timestamp_offset) override;
   bool AppendChunks(

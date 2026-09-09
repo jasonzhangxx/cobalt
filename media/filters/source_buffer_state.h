@@ -74,6 +74,15 @@ class MEDIA_EXPORT SourceBufferState {
   // alter their behavior to attempt to buffer media for further playback.
   [[nodiscard]] bool AppendToParseBuffer(base::span<const uint8_t> data);
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Zero-copy variant of the above: `data` is borrowed by the StreamParser and
+  // must remain valid and unmodified until `release_runner` is destroyed. See
+  // StreamParser::AppendToParseBuffer() for the full contract.
+  [[nodiscard]] bool AppendToParseBuffer(
+      base::span<const uint8_t> data,
+      base::ScopedClosureRunner release_runner);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
   // Tells the stream parser to parse more of the data previously sent to it
   // from this object's AppendToParseBuffer(). `*timestamp_offset` is used and
   // possibly updated by the parsing.  `append_window_start` and

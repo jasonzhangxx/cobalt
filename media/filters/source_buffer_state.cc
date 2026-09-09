@@ -217,6 +217,14 @@ bool SourceBufferState::AppendToParseBuffer(base::span<const uint8_t> data) {
   return stream_parser_->AppendToParseBuffer(data);
 }
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+bool SourceBufferState::AppendToParseBuffer(
+    base::span<const uint8_t> data,
+    base::ScopedClosureRunner release_runner) {
+  return stream_parser_->AppendToParseBuffer(data, std::move(release_runner));
+}
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
 StreamParser::ParseStatus SourceBufferState::RunSegmentParserLoop(
     base::TimeDelta append_window_start,
     base::TimeDelta append_window_end,

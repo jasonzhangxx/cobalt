@@ -304,6 +304,36 @@ TEST_F(BoxReaderTest, SkippingUuid) {
   TestTopLevelBox(kData, sizeof(kData), FOURCC_UUID);
 }
 
+#if BUILDFLAG(IS_COBALT)
+TEST_F(BoxReaderTest, ReadTopLevelBoxHeaderPartialData) {
+  // 1 MB MDAT box where only the 8-byte header is present in the buffer
+  static const uint8_t kMdatHeaderOnly[] = {
+      0x00, 0x10, 0x00, 0x00,  // box size = 1,048,576 bytes
+      'm',  'd',  'a',  't',
+  };
+
+  FourCC type;
+  size_t box_size = 0;
+  // StartTopLevelBox fails because payload is missing
+  EXPECT_EQ(ParseResult::kNeedMoreData,
+            BoxReader::StartTopLevelBox(kMdatHeaderOnly, sizeof(kMdatHeaderOnly),
+                                       &media_log_, &type, &box_size));
+
+  // ReadTopLevelBoxHeader succeeds because header itself is complete
+  EXPECT_EQ(ParseResult::kOk,
+            BoxReader::ReadTopLevelBoxHeader(
+                kMdatHeaderOnly, sizeof(kMdatHeaderOnly), &media_log_, &type,
+                &box_size));
+  EXPECT_EQ(FOURCC_MDAT, type);
+  EXPECT_EQ(1048576u, box_size);
+
+  // Incomplete header (< 8 bytes) returns kNeedMoreData
+  EXPECT_EQ(ParseResult::kNeedMoreData,
+            BoxReader::ReadTopLevelBoxHeader(kMdatHeaderOnly, 7, &media_log_,
+                                            &type, &box_size));
+}
+#endif  // BUILDFLAG(IS_COBALT)
+
 TEST_F(BoxReaderTest, NestedBoxWithHugeSize) {
   // This data is not a valid 'emsg' box. It is just used as a top-level box
   // as ReadTopLevelBox() has a restricted set of boxes it allows. |kData|

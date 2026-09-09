@@ -524,6 +524,21 @@ BASE_FEATURE(kCobaltUseExternalMediaMemoryPool,
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
+#if BUILDFLAG(IS_COBALT)
+// When enabled, Cobalt retains the ArrayBuffer passed to
+// SourceBuffer.appendBuffer() until the StreamParser is done with it, instead
+// of copying its contents into the parser's internal byte queue. The data is
+// handed to the parser as a borrowed `base::span` paired with a release
+// closure; the parser destroys the closure to drop Cobalt's reference to the
+// ArrayBuffer.
+//
+// NOTE: This deviates from the MSE specification, which allows the web app to
+// modify or reuse the appended buffer as soon as appendBuffer() returns.
+BASE_FEATURE(kCobaltRetainAppendedArrayBuffer,
+             "CobaltRetainAppendedArrayBuffer",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_COBALT)
+
 #if BUILDFLAG(IS_CHROMEOS)
 // To control running audio communication effect on Chrome OS Audio Server.
 BASE_FEATURE(kCrOSSystemAEC,

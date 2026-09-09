@@ -142,6 +142,14 @@ bool WebSourceBufferImpl::AppendToParseBuffer(
   return demuxer_->AppendToParseBuffer(id_, data);
 }
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+bool WebSourceBufferImpl::AppendToParseBuffer(
+    base::span<const unsigned char> data,
+    base::ScopedClosureRunner release_runner) {
+  return demuxer_->AppendToParseBuffer(id_, data, std::move(release_runner));
+}
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
 media::StreamParser::ParseStatus WebSourceBufferImpl::RunSegmentParserLoop(
     double* timestamp_offset) {
   base::TimeDelta old_offset = timestamp_offset_;

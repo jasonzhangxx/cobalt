@@ -137,4 +137,12 @@ StarboardMediaExternalMemoryAllocator::CopyFrom(base::span<const uint8_t> span,
       pool, handle, span.size(), data_ptr, type);
 }
 
+std::unique_ptr<DecoderBuffer::ExternalMemory>
+StarboardMediaExternalMemoryAllocator::CopyFrom(
+    base::span<const base::span<const uint8_t>> parts,
+    DemuxerStream::Type type) {
+  // TODO: support zero copy alloc.
+  return ExternalMemoryAllocator::CopyFrom(parts, type);
+}
+
 }  // namespace media
