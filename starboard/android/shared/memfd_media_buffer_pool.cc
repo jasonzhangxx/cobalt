@@ -149,7 +149,12 @@ void MemFdMediaBufferPool::Write(intptr_t position,
                                  size_t size) {
   // fd_ is guaranteed to be >= 0 if Get() returned this instance.
   SB_DCHECK_GE(fd_, 0);
-  SB_DCHECK(!IsPointerAnnotated(position));
+  // |position| is a byte offset into the pool and is not necessarily aligned,
+  // as a caller may write to the middle of a block. It therefore cannot be
+  // checked with IsPointerAnnotated(), which assumes what it inspects is either
+  // an annotated pointer or an aligned one. The bounds check below catches a
+  // caller that failed to unannotate, as an annotated value is about twice the
+  // offset it wraps.
 
   if (static_cast<size_t>(position) + size > current_capacity_) {
     SB_LOG(ERROR) << "MemFdMediaBufferPool: Write out of bounds. pos="

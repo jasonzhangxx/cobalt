@@ -48,11 +48,13 @@ class MEDIA_EXPORT StarboardMediaExternalMemoryAllocator
   StarboardMediaExternalMemoryAllocator& operator=(
       const StarboardMediaExternalMemoryAllocator&) = delete;
 
-  // ExternalMemoryAllocator implementation:
   std::unique_ptr<DecoderBuffer::ExternalMemory> CopyFrom(
       base::span<const uint8_t> span) override;
   std::unique_ptr<DecoderBuffer::ExternalMemory> CopyFrom(
       base::span<const uint8_t> span,
+      DemuxerStream::Type type) override;
+  std::unique_ptr<DecoderBuffer::ExternalMemory> CopyFrom(
+      base::span<const base::span<const uint8_t>> parts,
       DemuxerStream::Type type) override;
 };
 

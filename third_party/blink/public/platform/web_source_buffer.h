@@ -88,6 +88,23 @@ class WebSourceBuffer {
   [[nodiscard]] virtual bool AppendToParseBuffer(
       base::span<const unsigned char> data) = 0;
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Zero-copy variant of AppendToParseBuffer() above. `data` is borrowed by the
+  // underlying stream parser, which may retain the span rather than copying it.
+  // The caller must keep the memory referenced by `data` valid and unmodified
+  // until `release_runner` is destroyed; the parser destroys it once it no
+  // longer needs the bytes. This may happen on any thread and at any point
+  // after this call returns.
+  //
+  // The default implementation falls back to the copying variant above, which
+  // releases `data` immediately.
+  [[nodiscard]] virtual bool AppendToParseBuffer(
+      base::span<const unsigned char> data,
+      base::ScopedClosureRunner release_runner) {
+    return AppendToParseBuffer(data);
+  }
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
   // Intended to be called potentially asynchronously after
   // SourceBuffer.appendBuffer() and potentially repeatedly, runs the segment
   // parser loop algorithm on any data already in the parser input buffer (see

@@ -40,7 +40,7 @@ class MediaBufferPoolDecoderBufferAllocatorStrategy
 
   void Free(DemuxerStream::Type type, void* p) override;
 
-  void Write(void* p, const void* data, size_t size) override;
+  void Write(void* p, size_t offset, const void* data, size_t size) override;
 
   size_t GetCapacity() const override;
 

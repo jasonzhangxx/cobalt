@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
@@ -26,6 +27,7 @@
 #include "media/base/encryption_pattern.h"
 #include "media/base/encryption_scheme.h"
 #include "media/base/media_client.h"
+#include "media/base/media_switches.h"
 #include "media/base/media_tracks.h"
 #include "media/base/media_util.h"
 #include "media/base/stream_parser.h"
@@ -48,6 +50,12 @@ namespace {
 const int kMaxEmptySampleLogs = 20;
 const int kMaxInvalidConversionLogs = 20;
 const int kMaxVideoKeyframeMismatchLogs = 10;
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+// A top-level box header is 4 bytes of size plus a 4-byte type, or -- when the
+// size field holds the escape value 1 -- a further 8 bytes of largesize.
+constexpr size_t kMaxBoxHeaderSize = 16u;
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
 // Caller should be prepared to handle return of EncryptionScheme::kUnencrypted
 // in case of unsupported scheme.
@@ -167,9 +175,17 @@ void MP4StreamParser::Reset() {
   mdat_tail_ = 0;
 
 #if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Releases every retained append, so no borrowed buffer outlives the parser
+  // state that referenced it.
+  segmented_queue_.Reset();
+
+  // Both queues have now returned their head to zero, so the next append is
+  // free to pick either one again.
+  queue_mode_ = QueueMode::kUndetermined;
+
   scratch_frame_buf_.clear();
   scratch_frame_buf_.shrink_to_fit();
-#endif
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 }
 
 void MP4StreamParser::Flush() {
@@ -205,6 +221,19 @@ bool MP4StreamParser::AppendToParseBuffer(base::span<const uint8_t> buf) {
   // could lead to memory corruption, preferring CHECK.
   CHECK_EQ(queue_.tail(), max_parse_offset_);
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // `queue_` and `segmented_queue_` are mutually exclusive. Whichever one the
+  // first append lands in is the one the parser reads for the rest of the
+  // stream, since the two maintain independent offset spaces and mixing them
+  // would silently interleave data.
+  DCHECK_NE(queue_mode_, QueueMode::kBorrowing);
+  if (queue_mode_ == QueueMode::kUndetermined) {
+    LOG(ERROR) << "JA: MP4StreamParser this=" << this
+               << " queue mode determined: copying";
+  }
+  queue_mode_ = QueueMode::kCopying;
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
   if (!queue_.Push(buf)) {
     DVLOG(2) << "AppendToParseBuffer(): Failed to push buf of size "
              << buf.size();
@@ -215,6 +244,40 @@ bool MP4StreamParser::AppendToParseBuffer(base::span<const uint8_t> buf) {
 }
 
 #if BUILDFLAG(USE_STARBOARD_MEDIA)
+bool MP4StreamParser::AppendToParseBuffer(
+    base::span<const uint8_t> buf,
+    base::ScopedClosureRunner release_runner) {
+  // Blink only routes appends through this overload when the feature is on;
+  // otherwise it calls the copying overload directly. If that ever changes,
+  // the buffer would be retained without the guarantees the feature implies.
+  DCHECK(base::FeatureList::IsEnabled(kCobaltRetainAppendedArrayBuffer));
+
+  DCHECK_NE(state_, kWaitingForInit);
+
+  if (state_ == kError) {
+    // Same rationale as the copying overload: report success so the app sees
+    // an async decode error rather than a synchronous QuotaExceededErr.
+    // `release_runner` is destroyed on return, so `buf` is not retained.
+    return true;
+  }
+
+  // Ensure that we are not still in the middle of iterating Parse calls for
+  // previously appendded data.
+  CHECK_EQ(segmented_queue_.tail(), max_parse_offset_);
+
+  // Mirror of the DCHECK in the copying overload.
+  DCHECK_NE(queue_mode_, QueueMode::kCopying);
+  if (queue_mode_ == QueueMode::kUndetermined) {
+    LOG(ERROR) << "JA: MP4StreamParser this=" << this
+               << " queue mode determined: borrowing";
+  }
+  queue_mode_ = QueueMode::kBorrowing;
+
+  segmented_queue_.Push(buf, std::move(release_runner));
+
+  return true;
+}
+
 StreamParser::ParseStatus MP4StreamParser::Parse(
     int max_pending_bytes_to_inspect) {
   if (!StreamParser::IsIncrementalParseLookAheadEnabled() ||
@@ -232,7 +295,8 @@ StreamParser::ParseStatus MP4StreamParser::Parse(
 
     ParseStatus result = ParseInternal(max_pending_bytes_to_inspect);
 
-    if (result == ParseStatus::kFailed || max_parse_offset_ == queue_.tail() ||
+    if (result == ParseStatus::kFailed ||
+        max_parse_offset_ == QueueTail() ||
         previous_max_parse_offset == max_parse_offset_ ||
         buffers_parsed_ || loop_count == kMaxLoopCount) {
       return result;
@@ -256,10 +320,10 @@ StreamParser::ParseStatus MP4StreamParser::Parse(
 
   // Update `max_parse_offset_` to include potentially more appended bytes in
   // scope of this Parse() call.
-  DCHECK_GE(max_parse_offset_, queue_.head());
-  DCHECK_LE(max_parse_offset_, queue_.tail());
-  max_parse_offset_ =
-      std::min(queue_.tail(), max_parse_offset_ + max_pending_bytes_to_inspect);
+  DCHECK_GE(max_parse_offset_, QueueHead());
+  DCHECK_LE(max_parse_offset_, QueueTail());
+  max_parse_offset_ = std::min(
+      QueueTail(), max_parse_offset_ + max_pending_bytes_to_inspect);
 
   BufferQueueMap buffers;
 
@@ -311,28 +375,58 @@ StreamParser::ParseStatus MP4StreamParser::Parse(
     return ParseStatus::kFailed;
   }
 
-  DCHECK_LE(max_parse_offset_, queue_.tail());
-  if (max_parse_offset_ < queue_.tail()) {
+  DCHECK_LE(max_parse_offset_, QueueTail());
+  if (max_parse_offset_ < QueueTail()) {
     return ParseStatus::kSuccessHasMoreData;
   }
   return ParseStatus::kSuccess;
 }
 
+int64_t MP4StreamParser::QueueHead() {
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (queue_mode_ == QueueMode::kBorrowing) {
+    return segmented_queue_.head();
+  }
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+  return queue_.head();
+}
+
+int64_t MP4StreamParser::QueueTail() {
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (queue_mode_ == QueueMode::kBorrowing) {
+    return segmented_queue_.tail();
+  }
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Under kUndetermined both queues are empty with a head of zero, so `queue_`
+  // is as good an answer as the other.
+  return queue_.tail();
+}
+
 void MP4StreamParser::ModulatedPeek(const uint8_t** buf, int* size) {
   DCHECK(buf);
   DCHECK(size);
-
-  queue_.Peek(buf, size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (queue_mode_ == QueueMode::kBorrowing) {
+    // Offsets are absolute here, so the front of the queue has to be named
+    // explicitly; there is no "from the start" shorthand.
+    base::span<const uint8_t> span =
+        segmented_queue_.GetContiguousData(segmented_queue_.head());
+    *buf = span.data();
+    *size = base::checked_cast<int>(span.size());
+  } else
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+  {
+    queue_.Peek(buf, size);
+  }
 
   // The size or even availability of anything to parse (in scope of current
   // iteration of Parse()) may be less than reported in the Peek() call,
   // depending on `max_parse_offset_`.
-  DCHECK_GE(max_parse_offset_, queue_.head());
-  DCHECK_LE(max_parse_offset_, queue_.tail());
+  DCHECK_GE(max_parse_offset_, QueueHead());
+  DCHECK_LE(max_parse_offset_, QueueTail());
   if (*buf) {
-    int parseable_size = max_parse_offset_ - queue_.head();
-    DCHECK_LE(parseable_size, *size);
-    *size = parseable_size;
+    const int parseable_size = max_parse_offset_ - QueueHead();
+    *size = std::min(parseable_size, *size);
     if (!*size) {
       *buf = nullptr;
     }
@@ -344,8 +438,12 @@ void MP4StreamParser::ModulatedPeekAt(int64_t offset,
                                       int* size) {
   DCHECK(buf);
   DCHECK(size);
-  DCHECK_GE(max_parse_offset_, queue_.head());
-  DCHECK_LE(max_parse_offset_, queue_.tail());
+  DCHECK_GE(max_parse_offset_, QueueHead());
+  DCHECK_LE(max_parse_offset_, QueueTail());
+  // Both queues require this: OffsetByteQueue::PeekAt() documents a read
+  // before the head as an error, and the segmented queue returns an empty
+  // span, which the caller would see as a spurious "need more data".
+  DCHECK_GE(offset, QueueHead());
 
   if (offset >= max_parse_offset_) {
     *buf = nullptr;
@@ -353,20 +451,41 @@ void MP4StreamParser::ModulatedPeekAt(int64_t offset,
     return;
   }
 
-  queue_.PeekAt(offset, buf, size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (queue_mode_ == QueueMode::kBorrowing) {
+    base::span<const uint8_t> span = segmented_queue_.GetContiguousData(offset);
+    *buf = span.data();
+    *size = base::checked_cast<int>(span.size());
+  } else
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+  {
+    queue_.PeekAt(offset, buf, size);
+  }
 
   if (*buf) {
-    int parseable_size = max_parse_offset_ - offset;
-    DCHECK_LE(parseable_size, *size);
+    const int parseable_size = max_parse_offset_ - offset;
+    // Guaranteed by the early return above.
     DCHECK_GT(parseable_size, 0);
-    *size = parseable_size;
+    *size = std::min(parseable_size, *size);
   }
 }
 
 bool MP4StreamParser::ModulatedTrim(int64_t max_offset) {
-  DCHECK_GE(max_parse_offset_, queue_.head());
-  DCHECK_LE(max_parse_offset_, queue_.tail());
+  DCHECK_GE(max_parse_offset_, QueueHead());
+  DCHECK_LE(max_parse_offset_, QueueTail());
   max_offset = std::min(max_offset, max_parse_offset_);
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (queue_mode_ == QueueMode::kBorrowing) {
+    // Same contract as OffsetByteQueue::Trim(), but this one genuinely
+    // releases memory: a segment that becomes fully consumed has its retention
+    // closure run, dropping the appended ArrayBuffer. Any span previously
+    // handed out by the queue is invalidated here, so callers must not hold
+    // one across this call.
+    return segmented_queue_.Trim(max_offset);
+  }
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
   return queue_.Trim(max_offset);
 }
 
@@ -382,6 +501,72 @@ ParseResult MP4StreamParser::ParseBox() {
   std::unique_ptr<BoxReader> reader;
   ParseResult result =
       BoxReader::ReadTopLevelBox(buf, size, media_log_, &reader);
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (result == ParseResult::kNeedMoreData &&
+      queue_mode_ == QueueMode::kBorrowing) {
+    // The box ran past the end of the run ModulatedPeek() handed back, but
+    // more of it may be buffered in a later segment. Retry by reading the
+    // header on its own.
+    const int64_t box_head = segmented_queue_.head();
+
+    // How much of the box is both buffered and inside the current parse
+    // window. This is an availability bound, never a contiguity bound: a box
+    // spanning several segments is still fully available.
+    const size_t available =
+        base::checked_cast<size_t>(max_parse_offset_ - box_head);
+
+    if (available <= static_cast<size_t>(size)) {
+      // The run already covered the whole window, so there is genuinely
+      // nothing more buffered to gather.
+      return result;
+    }
+
+    FourCC type;
+    size_t box_size = 0u;
+    queue_.Reset();
+
+    // Gathering the header costs at most 16 bytes. Read it on its own first,
+    // so that a box we are not going to parse can be skipped by offset
+    // instead of being copied in full.
+    const size_t header_size = std::min(available, kMaxBoxHeaderSize);
+    std::vector<base::span<const uint8_t>> segments;
+    CHECK(segmented_queue_.GetSegmentedData(&segments, header_size, box_head));
+    for (const auto& segment : segments) {
+      if (!queue_.Push(segment)) {
+        DVLOG(2) << "ParseBox(): Failed to push segment of size "
+                 << segment.size();
+        return ParseResult::kError;
+      }
+    }
+    queue_.Peek(&buf, &size);
+    result = BoxReader::ReadTopLevelBoxHeader(buf, size, media_log_, &type,
+                                              &box_size);
+    if (result != ParseResult::kOk) {
+      // Not enough data for the box header.
+      return result;
+    }
+
+    if (box_size > available) {
+      // Header is here, payload is not. Parse() widens the window and retries.
+      return ParseResult::kNeedMoreData;
+    }
+
+    // Gather the whole box.
+    CHECK(segmented_queue_.GetSegmentedData(&segments, box_size - header_size, box_head + header_size));
+    for (const auto& segment : segments) {
+      if (!queue_.Push(segment)) {
+        DVLOG(2) << "ParseBox(): Failed to push segment of size "
+                 << segment.size();
+        return ParseResult::kError;
+      }
+    }
+    queue_.Peek(&buf, &size);
+
+    result = BoxReader::ReadTopLevelBox(buf, size, media_log_, &reader);
+  }
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
   if (result != ParseResult::kOk)
     return result;
 
@@ -390,12 +575,12 @@ ParseResult MP4StreamParser::ParseBox() {
     if (!ParseMoov(reader.get()))
       return ParseResult::kError;
   } else if (reader->type() == FOURCC_MOOF) {
-    moof_head_ = queue_.head();
+    moof_head_ = QueueHead();
     if (!ParseMoof(reader.get()))
       return ParseResult::kError;
 
     // Set up first mdat offset for ReadMDATsUntil().
-    mdat_tail_ = queue_.head() + reader->box_size();
+    mdat_tail_ = QueueHead() + reader->box_size();
 
     // Return early to avoid evicting 'moof' data from queue. Auxiliary info may
     // be located anywhere in the file, including inside the 'moof' itself.
@@ -408,7 +593,19 @@ ParseResult MP4StreamParser::ParseBox() {
     DVLOG(2) << "Skipping top-level box: " << FourCCToString(reader->type());
   }
 
-  queue_.Pop(reader->box_size());
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (queue_mode_ == QueueMode::kBorrowing) {
+    // Drop the reader before popping. Unlike OffsetByteQueue::Pop(), which
+    // only advances an offset, this Pop() releases the segment, and on the
+    // in-place path the reader holds a base::raw_span into it.
+    const size_t parsed_box_size = reader->box_size();
+    reader.reset();
+    segmented_queue_.Pop(parsed_box_size);
+  } else
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+  {
+    queue_.Pop(reader->box_size());
+  }
   return ParseResult::kOk;
 }
 
@@ -995,6 +1192,25 @@ ParseResult MP4StreamParser::EnqueueSample(BufferQueueMap* buffers) {
   // portion of the total system memory.
   if (runs_->AuxInfoNeedsToBeCached()) {
     ModulatedPeekAt(runs_->aux_info_offset() + moof_head_, &buf, &buf_size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+    const size_t aux_head = runs_->aux_info_offset() + moof_head_;
+    if (buf_size < runs_->aux_info_size() && queue_mode_ == QueueMode::kBorrowing && max_parse_offset_ >= aux_head + runs_->aux_info_size()) {
+      const size_t aux_info_size =
+          base::checked_cast<size_t>(runs_->aux_info_size());
+      queue_.Reset();
+
+      std::vector<base::span<const uint8_t>> segments;
+      CHECK(segmented_queue_.GetSegmentedData(&segments, aux_info_size, aux_head));
+      for (const auto& segment : segments) {
+        if (!queue_.Push(segment)) {
+          DVLOG(2) << "ParseBox(): Failed to push segment of size "
+                  << segment.size();
+          return ParseResult::kError;
+        }
+      }
+      queue_.Peek(&buf, &buf_size);
+    }
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
     if (buf_size < runs_->aux_info_size()) {
       return ParseResult::kNeedMoreData;
     }
@@ -1006,7 +1222,8 @@ ParseResult MP4StreamParser::EnqueueSample(BufferQueueMap* buffers) {
     return ParseResult::kOk;
   }
 
-  ModulatedPeekAt(runs_->sample_offset() + moof_head_, &buf, &buf_size);
+  const int64_t sample_head = runs_->sample_offset() + moof_head_;
+  ModulatedPeekAt(sample_head, &buf, &buf_size);
 
   if (runs_->sample_size() >
       static_cast<uint32_t>(std::numeric_limits<int>::max())) {
@@ -1016,8 +1233,15 @@ ParseResult MP4StreamParser::EnqueueSample(BufferQueueMap* buffers) {
 
   int sample_size = base::checked_cast<int>(runs_->sample_size());
 
-  if (buf_size < sample_size)
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Check |max_parse_offset_| instead of buf_size.
+  if(max_parse_offset_ < sample_head + sample_size) {
     return ParseResult::kNeedMoreData;
+  }
+#else  // BUILDFLAG(USE_STARBOARD_MEDIA)
+  if (buf_size < sample_size)
+      return ParseResult::kNeedMoreData;
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   if (sample_size == 0) {
     // Generally not expected, but spec allows it. Code below this block assumes
@@ -1065,7 +1289,21 @@ ParseResult MP4StreamParser::EnqueueSample(BufferQueueMap* buffers) {
             VideoCodec::kDolbyVision) {
       DCHECK(runs_->video_description().frame_bitstream_converter);
       BitstreamConverter::AnalysisResult analysis;
-      frame_buf.assign(buf, buf + sample_size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+      if (buf_size < sample_size && queue_mode_ == QueueMode::kBorrowing) {
+        // Gather sample data from segments into |frame_buf|.
+        std::vector<base::span<const uint8_t>> segments;
+        CHECK(segmented_queue_.GetSegmentedData(
+            &segments, base::checked_cast<size_t>(sample_size), sample_head));
+        frame_buf.reserve(sample_size);
+        for (const auto& segment : segments) {
+          frame_buf.insert(frame_buf.end(), segment.begin(), segment.end());
+        }
+      } else
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+      {
+        frame_buf.assign(buf, buf + sample_size);
+      }
       if (!runs_->video_description()
                .frame_bitstream_converter->ConvertAndAnalyzeFrame(
                    &frame_buf, is_keyframe, &subsamples, &analysis)) {
@@ -1113,8 +1351,31 @@ ParseResult MP4StreamParser::EnqueueSample(BufferQueueMap* buffers) {
   if (audio) {
     if (ESDescriptor::IsAAC(runs_->audio_description().esds.object_type)) {
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-      heap_frame_buf = PrepareAACBuffer(runs_->audio_description().esds.aac,
-                                        {buf, buf + sample_size}, &subsamples);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+      if (buf_size < sample_size && queue_mode_ == QueueMode::kBorrowing) {
+        // Gather sample data from segments into |frame_buf|.
+        std::vector<base::span<const uint8_t>> segments;
+        CHECK(segmented_queue_.GetSegmentedData(
+            &segments, base::checked_cast<size_t>(sample_size), sample_head));
+        queue_.Reset();
+        for (const auto& segment : segments) {
+          if (!queue_.Push(segment)) {
+            DVLOG(2) << "ParseBox(): Failed to push segment of size "
+                    << segment.size();
+            return ParseResult::kError;
+          }
+        }
+        const uint8_t* queue_buf;
+        int queue_buf_size;
+        queue_.Peek(&queue_buf, &queue_buf_size);
+        heap_frame_buf = PrepareAACBuffer(runs_->audio_description().esds.aac,
+                                          {queue_buf, queue_buf + sample_size}, &subsamples);
+      } else
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+      {
+        heap_frame_buf = PrepareAACBuffer(runs_->audio_description().esds.aac,
+                                          {buf, buf + sample_size}, &subsamples);
+      }
       if (heap_frame_buf.empty()) {
         MEDIA_LOG(ERROR, media_log_)
             << "Failed to prepare AAC sample for decode";
@@ -1150,15 +1411,31 @@ ParseResult MP4StreamParser::EnqueueSample(BufferQueueMap* buffers) {
   if (auto* media_client = GetMediaClient()) {
     if (auto* alloc = media_client->GetMediaAllocator()) {
 #if BUILDFLAG(USE_STARBOARD_MEDIA)
-      stream_buf = StreamParserBuffer::FromExternalMemory(
-          alloc->CopyFrom(
-              frame_buf.empty()
-                  ? (heap_frame_buf.empty()
-                         ? base::span<const uint8_t>{buf, buf + sample_size}
-                         : heap_frame_buf)
-                  : frame_buf,
-              buffer_type),
-          is_keyframe, buffer_type, runs_->track_id());
+      if (frame_buf.empty() && heap_frame_buf.empty()) {
+        if(buf_size < sample_size && queue_mode_ == QueueMode::kBorrowing) {
+          std::vector<base::span<const uint8_t>> segments;
+          CHECK(segmented_queue_.GetSegmentedData(&segments, sample_size, sample_head));
+          stream_buf = StreamParserBuffer::FromExternalMemory(
+              alloc->CopyFrom(segments, buffer_type), is_keyframe,
+              buffer_type, runs_->track_id());
+        }
+        else {
+          stream_buf = StreamParserBuffer::FromExternalMemory(
+              alloc->CopyFrom(
+                  base::span<const uint8_t>{buf, buf + sample_size},
+                  buffer_type),
+              is_keyframe, buffer_type, runs_->track_id());
+        }
+      } else {
+        // Post-processed sample: the prepared bytes live in one of the staging
+        // buffers and are already contiguous.
+        stream_buf = StreamParserBuffer::FromExternalMemory(
+            alloc->CopyFrom(frame_buf.empty()
+                                ? base::span<const uint8_t>(heap_frame_buf)
+                                : base::span<const uint8_t>(frame_buf),
+                            buffer_type),
+            is_keyframe, buffer_type, runs_->track_id());
+      }
 #else  // BUILDFLAG(USE_STARBOARD_MEDIA)
       stream_buf = StreamParserBuffer::FromExternalMemory(
           alloc->CopyFrom(
@@ -1175,9 +1452,20 @@ ParseResult MP4StreamParser::EnqueueSample(BufferQueueMap* buffers) {
     // Skip using the ExternalMemoryAdapter if possible since it can have more
     // overhead in some applications. See https://crbug.com/353751208.
     if (frame_buf.empty() && heap_frame_buf.empty()) {
-      auto buf_span = base::span(buf, base::checked_cast<size_t>(sample_size));
-      stream_buf = StreamParserBuffer::CopyFrom(buf_span, is_keyframe,
-                                                buffer_type, runs_->track_id());
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+      if(buf_size < sample_size && queue_mode_ == QueueMode::kBorrowing) {
+        std::vector<base::span<const uint8_t>> segments;
+        CHECK(segmented_queue_.GetSegmentedData(&segments, sample_size, sample_head));
+        stream_buf = StreamParserBuffer::CopyFrom(segments, is_keyframe,
+                                                  buffer_type, runs_->track_id());
+      }
+      else
+#endif // BUILDFLAG(USE_STARBOARD_MEDIA)   
+      {
+        auto buf_span = base::span(buf, base::checked_cast<size_t>(sample_size));
+        stream_buf = StreamParserBuffer::CopyFrom(buf_span, is_keyframe,
+                                                  buffer_type, runs_->track_id());
+      }                                     
     } else if (frame_buf.empty()) {
 #if BUILDFLAG(USE_STARBOARD_MEDIA)
       stream_buf = StreamParserBuffer::CopyFrom(
@@ -1262,16 +1550,53 @@ bool MP4StreamParser::SendAndFlushSamples(BufferQueueMap* buffers) {
 
 bool MP4StreamParser::ReadAndDiscardMDATsUntil(int64_t max_clear_offset) {
   ParseResult result = ParseResult::kOk;
-  DCHECK_LE(max_parse_offset_, queue_.tail());
+  DCHECK_LE(max_parse_offset_, QueueTail());
   int64_t upper_bound = std::min(max_clear_offset, max_parse_offset_);
+
   while (mdat_tail_ < upper_bound) {
     const uint8_t* buf = nullptr;
     int size = 0;
-    ModulatedPeekAt(mdat_tail_, &buf, &size);
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+    std::array<uint8_t, kMaxBoxHeaderSize> header_buf;
+    if (queue_mode_ == QueueMode::kBorrowing) {
+      if (mdat_tail_ >= max_parse_offset_) {
+        break;
+      }
+      const size_t available =
+          base::checked_cast<size_t>(max_parse_offset_ - mdat_tail_);
+      base::span<const uint8_t> contiguous =
+          segmented_queue_.GetContiguousData(mdat_tail_);
+      if (contiguous.size() >= kMaxBoxHeaderSize ||
+          contiguous.size() >= available) {
+        buf = contiguous.data();
+        size = static_cast<int>(std::min(contiguous.size(), available));
+      } else {
+        const size_t header_size = std::min(available, kMaxBoxHeaderSize);
+        if (!segmented_queue_.LinearizeData(
+                base::span(header_buf).first(header_size), mdat_tail_)) {
+          break;
+        }
+        buf = header_buf.data();
+        size = static_cast<int>(header_size);
+      }
+    } else
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+    {
+      ModulatedPeekAt(mdat_tail_, &buf, &size);
+    }
 
     FourCC type;
     size_t box_sz;
-    result = BoxReader::StartTopLevelBox(buf, size, media_log_, &type, &box_sz);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+    if (queue_mode_ == QueueMode::kBorrowing) {
+      result = BoxReader::ReadTopLevelBoxHeader(buf, size, media_log_, &type, &box_sz);
+    }
+    else
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+    {
+      result = BoxReader::StartTopLevelBox(buf, size, media_log_, &type, &box_sz);
+    }
     if (result != ParseResult::kOk)
       break;
 
@@ -1303,7 +1628,7 @@ bool MP4StreamParser::HaveEnoughDataToEnqueueSamples() {
   // data and allow per sample offset checks to meter sample enqueuing.
   // TODO(acolwell): Fix trun box handling so we don't have to special case
   // muxed content.
-  DCHECK_LE(max_parse_offset_, queue_.tail());
+  DCHECK_LE(max_parse_offset_, QueueTail());
   return !(has_audio_ && has_video_ &&
            max_parse_offset_ < highest_end_offset_ + moof_head_);
 }

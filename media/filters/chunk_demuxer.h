@@ -353,6 +353,16 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   [[nodiscard]] bool AppendToParseBuffer(const std::string& id,
                                          base::span<const uint8_t> data);
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Zero-copy variant of the above: `data` is borrowed by the stream parser and
+  // must remain valid and unmodified until `release_runner` is destroyed. See
+  // StreamParser::AppendToParseBuffer() for the full contract.
+  [[nodiscard]] bool AppendToParseBuffer(
+      const std::string& id,
+      base::span<const uint8_t> data,
+      base::ScopedClosureRunner release_runner);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
   // Tells the stream parser for the source buffer associated with `id` to parse
   // more of the data previously sent to it from this object's
   // AppendToParseBuffer(). This operation applies and possibly updates

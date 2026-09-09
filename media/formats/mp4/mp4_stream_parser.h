@@ -13,11 +13,14 @@
 
 #include "base/compiler_specific.h"
 #include "base/containers/flat_set.h"
+#include "base/containers/span.h"
 #include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "media/base/media_export.h"
 #include "media/base/stream_parser.h"
 #include "media/formats/common/offset_byte_queue.h"
+#include "media/formats/common/offset_segmented_byte_queue.h"
 #include "media/formats/mp4/parse_result.h"
 #include "media/formats/mp4/track_run_iterator.h"
 
@@ -56,6 +59,11 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
   bool GetGenerateTimestampsFlag() const override;
   [[nodiscard]] bool AppendToParseBuffer(
       base::span<const uint8_t> buf) override;
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  [[nodiscard]] bool AppendToParseBuffer(
+      base::span<const uint8_t> buf,
+      base::ScopedClosureRunner release_runner) override;
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
   [[nodiscard]] ParseStatus Parse(int max_pending_bytes_to_inspect) override;
 #if BUILDFLAG(USE_STARBOARD_MEDIA)
  private:
@@ -80,6 +88,19 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
     kEmittingSamples,
     kError
   };
+
+  // Head and tail of whichever queue currently holds the stream, in absolute
+  // stream offsets. tail() is an exclusive bound.
+  //
+  // These exist only for the parse-window arithmetic around
+  // `max_parse_offset_`, which has to be expressed in the active queue's
+  // offset space or it compares against nothing. Data access deliberately does
+  // not go through them: the Modulated*() wrappers below are specific to
+  // `queue_`, and `segmented_queue_` has its own readers.
+  //
+  // Not const, because OffsetByteQueue::head()/tail() are not.
+  int64_t QueueHead();
+  int64_t QueueTail();
 
   // Wrappers of `queue_` that observe constraint of `max_parse_offset_`.
   void ModulatedPeek(const uint8_t** buf, int* size);
@@ -145,12 +166,23 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
   OffsetByteQueue queue_;
 
 #if BUILDFLAG(USE_STARBOARD_MEDIA)
+  enum class QueueMode {
+    kUndetermined,  // No append yet; either queue may still be chosen.
+    kCopying,       // `queue_` holds the stream.
+    kBorrowing,     // `segmented_queue_` holds the stream.
+  };
+  QueueMode queue_mode_ = QueueMode::kUndetermined;
+
+  // Zero-copy counterpart of `queue_`, holding each appended buffer by
+  // reference instead of copying it.
+  OffsetSegmentedByteQueue segmented_queue_;
+
   // Scratch buffer to reuse capacity for video frame bitstream conversion.
   // Reusing this is possible on Starboard because the frame data is copied
   // into the media pool rather than moved (which would release/deallocate
   // the vector's backing memory).
   std::vector<uint8_t> scratch_frame_buf_;
-#endif
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   // These two parameters are only valid in the |kEmittingSegments| state.
   //

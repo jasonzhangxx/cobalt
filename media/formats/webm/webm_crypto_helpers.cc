@@ -91,22 +91,17 @@ bool ExtractSubsamples(base::span<const uint8_t> buf,
   return true;
 }
 
-}  // namespace anonymous
+// Fills |decrypt_config| and |data_offset| from the encryption header at the
+// start of |data|. |data| may hold only the beginning of the frame, in which
+// case |frame_size| still describes the frame in full, because the size of the
+// last subsample partition is derived from it.
+bool CreateDecryptConfig(base::span<const uint8_t> data,
+                         size_t frame_size,
+                         base::span<const uint8_t> key_id,
+                         std::unique_ptr<DecryptConfig>* decrypt_config,
+                         size_t* data_offset) {
+  DCHECK_LE(data.size(), frame_size);
 
-bool WebMCreateDecryptConfig(const uint8_t* data_ptr,
-                             int data_size,
-                             const uint8_t* key_id_ptr,
-                             int key_id_size,
-                             std::unique_ptr<DecryptConfig>* decrypt_config,
-                             size_t* data_offset) {
-  // TODO(crbug.com/40284755):: The function should receive a span, not a
-  // pointer/length pair.
-  auto data =
-      UNSAFE_TODO(base::span(data_ptr, base::checked_cast<size_t>(data_size)));
-  // TODO(crbug.com/40284755):: The function should receive a span, not a
-  // pointer/length pair.
-  auto key_id = UNSAFE_TODO(
-      base::span(key_id_ptr, base::checked_cast<size_t>(key_id_size)));
   auto reader = base::SpanReader(data);
 
   uint8_t signal_byte;
@@ -140,13 +135,23 @@ bool WebMCreateDecryptConfig(const uint8_t* data_ptr,
       base::span<const uint8_t> partition_data;
       if (!reader.ReadInto(
               size_t{kWebMEncryptedFramePartitionOffsetSize} * num_partitions,
-              partition_data) ||
-          reader.remaining() == 0u) {
+              partition_data)) {
         DVLOG(1) << "Got a partitioned encrypted block with " << num_partitions
                  << " partitions but not enough data " << data.size();
         return false;
       }
-      if (!ExtractSubsamples(partition_data, reader.remaining(), num_partitions,
+
+      // The frame data is whatever follows the header, which is not
+      // necessarily what is left in `reader` when `data` is only a prefix.
+      const size_t frame_data_size =
+          frame_size - (data.size() - reader.remaining());
+      if (frame_data_size == 0u) {
+        DVLOG(1) << "Got a partitioned encrypted block with " << num_partitions
+                 << " partitions but not enough data " << data.size();
+        return false;
+      }
+
+      if (!ExtractSubsamples(partition_data, frame_data_size, num_partitions,
                              &subsample_entries)) {
         return false;
       }
@@ -165,5 +170,48 @@ bool WebMCreateDecryptConfig(const uint8_t* data_ptr,
 
   return true;
 }
+
+}  // namespace anonymous
+
+bool WebMCreateDecryptConfig(const uint8_t* data_ptr,
+                             int data_size,
+                             const uint8_t* key_id_ptr,
+                             int key_id_size,
+                             std::unique_ptr<DecryptConfig>* decrypt_config,
+                             size_t* data_offset) {
+  // TODO(crbug.com/40284755):: The function should receive a span, not a
+  // pointer/length pair.
+  auto data =
+      UNSAFE_TODO(base::span(data_ptr, base::checked_cast<size_t>(data_size)));
+  // TODO(crbug.com/40284755):: The function should receive a span, not a
+  // pointer/length pair.
+  auto key_id = UNSAFE_TODO(
+      base::span(key_id_ptr, base::checked_cast<size_t>(key_id_size)));
+  return CreateDecryptConfig(data, data.size(), key_id, decrypt_config,
+                             data_offset);
+}
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+bool WebMCreateDecryptConfig(const uint8_t* data_ptr,
+                             int data_size,
+                             int frame_size,
+                             const uint8_t* key_id_ptr,
+                             int key_id_size,
+                             std::unique_ptr<DecryptConfig>* decrypt_config,
+                             size_t* data_offset) {
+  DCHECK_LE(data_size, frame_size);
+
+  // TODO(crbug.com/40284755):: The function should receive a span, not a
+  // pointer/length pair.
+  auto data =
+      UNSAFE_TODO(base::span(data_ptr, base::checked_cast<size_t>(data_size)));
+  // TODO(crbug.com/40284755):: The function should receive a span, not a
+  // pointer/length pair.
+  auto key_id = UNSAFE_TODO(
+      base::span(key_id_ptr, base::checked_cast<size_t>(key_id_size)));
+  return CreateDecryptConfig(data, base::checked_cast<size_t>(frame_size),
+                             key_id, decrypt_config, data_offset);
+}
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
 }  // namespace media

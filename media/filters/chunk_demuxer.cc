@@ -1118,6 +1118,57 @@ bool ChunkDemuxer::AppendToParseBuffer(const std::string& id,
   return true;
 }
 
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+bool ChunkDemuxer::AppendToParseBuffer(
+    const std::string& id,
+    base::span<const uint8_t> data,
+    base::ScopedClosureRunner release_runner) {
+  DVLOG(1) << "AppendToParseBuffer(" << id << ", " << data.size()
+           << ", <release_runner>)";
+
+  DCHECK(!id.empty());
+
+  if (data.empty()) {
+    // Nothing is retained, so `release_runner` runs as this returns.
+    return true;
+  }
+
+  {
+    base::AutoLock auto_lock(lock_);
+    DCHECK_NE(state_, ENDED);
+
+    switch (state_) {
+      case INITIALIZING:
+      case INITIALIZED:
+        DCHECK(IsValidId_Locked(id));
+        if (!source_state_map_[id]->AppendToParseBuffer(
+                data, std::move(release_runner))) {
+          // Just indicate that the append failed. Let the caller give app an
+          // error so that it may adapt. This is different from
+          // RunSegmentParserLoop(), where fatal MediaSource failure should
+          // occur if the underlying parse fails.
+          return false;
+        }
+        break;
+
+      case PARSE_ERROR:
+      case WAITING_FOR_INIT:
+      case ENDED:
+      case SHUTDOWN:
+        DVLOG(1) << "AppendToParseBuffer(): called in unexpected state "
+                 << state_;
+        // See the comment in the copying overload above: report no failure to
+        // the caller so that the app sees an async decode error rather than a
+        // synchronous QuotaExceededErr. Nothing is retained, so
+        // `release_runner` runs as this returns.
+        return true;
+    }
+  }
+
+  return true;
+}
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
+
 StreamParser::ParseStatus ChunkDemuxer::RunSegmentParserLoop(
     const std::string& id,
     base::TimeDelta append_window_start,

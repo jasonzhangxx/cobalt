@@ -20,6 +20,7 @@
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/logging.h"
+#include "base/numerics/checked_math.h"
 #include "media/base/demuxer_stream.h"
 #include "media/starboard/decoder_buffer_allocator.h"
 
@@ -135,6 +136,64 @@ StarboardMediaExternalMemoryAllocator::CopyFrom(base::span<const uint8_t> span,
   const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(handle);
   return std::make_unique<StarboardPoolExternalMemory>(
       pool, handle, span.size(), data_ptr, type);
+}
+
+std::unique_ptr<DecoderBuffer::ExternalMemory>
+StarboardMediaExternalMemoryAllocator::CopyFrom(
+    base::span<const base::span<const uint8_t>> parts,
+    DemuxerStream::Type type) {
+  if (parts.size() == 1) {
+    return CopyFrom(parts[0], type);
+  }
+
+  auto* pool = DecoderBufferAllocator::Get();
+  if (!pool) {
+    LOG(ERROR) << "DecoderBufferAllocator instance is not initialized.";
+    return nullptr;
+  }
+
+  base::CheckedNumeric<size_t> checked_total_size = 0;
+  for (const auto& part : parts) {
+    checked_total_size += part.size();
+  }
+  size_t total_size = 0;
+  if (!checked_total_size.AssignIfValid(&total_size)) {
+    LOG(ERROR) << "Total size of the parts to copy overflows.";
+    return nullptr;
+  }
+
+  if (total_size == 0) {
+    return std::make_unique<StarboardPoolExternalMemory>(
+        pool, DecoderBuffer::Allocator::kInvalidHandle, 0, nullptr, type);
+  }
+
+  auto handle = pool->Allocate(type, total_size);
+  if (handle == DecoderBuffer::Allocator::kInvalidHandle) {
+    LOG(ERROR) << "Failed to allocate " << total_size
+               << " bytes from Starboard media buffer pool.";
+    return nullptr;
+  }
+
+  // Every part goes straight to its final position in the block, so the data is
+  // copied exactly once however many parts it arrives in, and no staging buffer
+  // the size of the whole frame is ever allocated.
+  size_t offset = 0;
+  for (const auto& part : parts) {
+    if (part.empty()) {
+      continue;
+    }
+    pool->Write(handle, offset, part.data(), part.size());
+    offset += part.size();
+  }
+  DCHECK_EQ(offset, total_size);
+
+  // Cast handle to pointer for read access in span.
+  // Note: If annotated pointers are enabled, IsPointerAnnotated check will
+  // occur when Span().data() is accessed, consistent with
+  // DecoderBuffer::data().
+  const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(handle);
+  return std::make_unique<StarboardPoolExternalMemory>(pool, handle, total_size,
+                                                       data_ptr, type);
 }
 
 }  // namespace media

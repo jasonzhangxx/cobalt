@@ -10,10 +10,49 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "base/memory/raw_ptr.h"
 #include "media/base/media_export.h"
+#include "media/media_buildflags.h"
 
 namespace media {
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+class ByteQueue;
+class SegmentedByteQueue;
+
+// A non-owning view over a SegmentedByteQueue, paired with a ByteQueue used as
+// scratch space.
+class MEDIA_EXPORT WebMSegmentedBuffer {
+ public:
+  WebMSegmentedBuffer(const SegmentedByteQueue* segmented_queue,
+                      ByteQueue* byte_queue);
+
+  WebMSegmentedBuffer(const WebMSegmentedBuffer&) = delete;
+  WebMSegmentedBuffer& operator=(const WebMSegmentedBuffer&) = delete;
+
+  ~WebMSegmentedBuffer();
+
+  // Returns a contiguous view of the `size` bytes starting at `offset`,
+  // truncated to however many bytes are actually available from `offset`.
+  // Returns an empty span when `offset` is at or past the end of the queue, or
+  // on allocation failure.
+  base::span<const uint8_t> LinearizeData(int offset, int size) const;
+
+  base::span<const uint8_t> GetContiguousData(int offset) const;
+
+  bool GetSegmentedData(
+      std::vector<base::span<const uint8_t>>* segments,
+      int offset,
+      int size) const;
+
+  int size() const;
+
+ private:
+  const raw_ptr<const SegmentedByteQueue> segmented_queue_;
+  const raw_ptr<ByteQueue> byte_queue_;
+};
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
 // Interface for receiving WebM parser events.
 //
@@ -39,6 +78,12 @@ class MEDIA_EXPORT WebMParserClient {
   virtual bool OnUInt(int id, int64_t val);
   virtual bool OnFloat(int id, double val);
   virtual bool OnBinary(int id, const uint8_t* data, int size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  virtual bool OnBinary(int id,
+                        const WebMSegmentedBuffer& buf,
+                        int offset,
+                        int size);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   // Note that |str| is not necessarily a valid WebM string-value; various EBML
   // "s" or "8" string elements are specified as either ASCII-printable (0x20 -
@@ -77,6 +122,10 @@ class MEDIA_EXPORT WebMListParser {
   // Returns 0 if more data is needed.
   // Returning > 0 indicates success & the number of bytes parsed.
   int Parse(const uint8_t* buf, int size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Same as above, for the `size` bytes at `offset` in `buf`.
+  int Parse(const WebMSegmentedBuffer& buf, int offset, int size);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   // Returns true if the entire list has been parsed.
   bool IsParsingComplete() const;
@@ -116,6 +165,16 @@ class MEDIA_EXPORT WebMListParser {
                        int64_t element_size,
                        const uint8_t* data,
                        int size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Same as above, with the element contents given as the `size` bytes at
+  // `offset` in `buf`.
+  int ParseListElement(int header_size,
+                       int id,
+                       int64_t element_size,
+                       const WebMSegmentedBuffer& buf,
+                       int offset,
+                       int size);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   // Called when starting to parse a new list.
   //
@@ -170,6 +229,17 @@ int MEDIA_EXPORT WebMParseElementHeader(const uint8_t* buf,
                                         int size,
                                         int* id,
                                         int64_t* element_size);
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+// Same as above, for the `size` bytes at `offset` in `buf`. The header is read
+// in place when it does not straddle a segment boundary; see
+// WebMSegmentedBuffer::LinearizeData().
+int MEDIA_EXPORT WebMParseElementHeader(const WebMSegmentedBuffer& buf,
+                                        int offset,
+                                        int size,
+                                        int* id,
+                                        int64_t* element_size);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
 }  // namespace media
 

@@ -44,14 +44,19 @@ bool MediaBufferPool::ExpandTo(size_t size) {
   return api_->ExpandTo(size);
 }
 
-void MediaBufferPool::Write(intptr_t position, const void* data, size_t size) {
+void MediaBufferPool::Write(intptr_t position,
+                            size_t offset,
+                            const void* data,
+                            size_t size) {
   SB_DCHECK(IsPointerAnnotated(position));
 
   // |position| is unannotated here, instead of in the extension, as this class
   // is supposed to abstract out all such details from the extension.
   position = UnannotatePointer(position);
 
-  api_->Write(position, data, size);
+  // The offset is applied only once |position| is unannotated, so that
+  // |position| itself stays aligned as the annotation requires.
+  api_->Write(position + static_cast<intptr_t>(offset), data, size);
 }
 
 }  // namespace experimental

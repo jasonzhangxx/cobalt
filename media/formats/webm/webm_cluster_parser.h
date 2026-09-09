@@ -178,6 +178,10 @@ class MEDIA_EXPORT WebMClusterParser : public WebMParserClient {
   // Returns 0 if more data is needed.
   // Returns the number of bytes parsed on success.
   int Parse(const uint8_t* buf, int size);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Same as above, for the `size` bytes at `offset` in `buf`.
+  int Parse(const WebMSegmentedBuffer& buf, int offset, int size);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   base::TimeDelta cluster_start_time() const { return cluster_start_time_; }
 
@@ -204,6 +208,12 @@ class MEDIA_EXPORT WebMClusterParser : public WebMParserClient {
   bool OnListEnd(int id) override;
   bool OnUInt(int id, int64_t val) override;
   bool OnBinary(int id, const uint8_t* data, int size) override;
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  bool OnBinary(int id,
+                const WebMSegmentedBuffer& buf,
+                int offset,
+                int size) override;
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   bool ParseBlock(bool is_simple_block,
                   const uint8_t* buf,
@@ -223,6 +233,32 @@ class MEDIA_EXPORT WebMClusterParser : public WebMParserClient {
                size_t additional_size,
                int64_t discard_padding,
                bool is_keyframe);
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Same as above, with the block given as the `size` bytes at `offset` in
+  // `buf`. Only the block header and, when encrypted, the encryption header
+  // are read into contiguous memory; the frame data is handed to
+  // StreamParserBuffer as segments and never copied twice.
+  bool ParseBlock(bool is_simple_block,
+                  const WebMSegmentedBuffer& buf,
+                  int offset,
+                  int size,
+                  const uint8_t* additional,
+                  int additional_size,
+                  int duration,
+                  int64_t discard_padding,
+                  bool reference_block_set);
+  bool OnBlock(bool is_simple_block,
+               int track_num,
+               int timecode,
+               int duration,
+               const WebMSegmentedBuffer& buf,
+               int offset,
+               int size,
+               const uint8_t* additional,
+               size_t additional_size,
+               int64_t discard_padding,
+               bool is_keyframe);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   // Helper method for Get{Audio,Video}Buffers() that recomputes
   // |ready_buffer_upper_bound_| and calls ExtractReadyBuffers() on each track.
