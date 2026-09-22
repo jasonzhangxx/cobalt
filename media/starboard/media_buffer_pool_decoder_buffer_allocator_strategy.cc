@@ -84,15 +84,17 @@ void MediaBufferPoolDecoderBufferAllocatorStrategy::Free(
 }
 
 void MediaBufferPoolDecoderBufferAllocatorStrategy::Write(void* p,
+                                                          size_t offset,
                                                           const void* data,
                                                           size_t size) {
   if (IsPointerAnnotated(p)) {
     // We send the annotated pointer directly to Write() as it expects an
-    // annotated pointer.
-    media_buffer_pool_->Write(reinterpret_cast<intptr_t>(p), data, size);
+    // annotated pointer, along with the offset it cannot be adjusted by.
+    media_buffer_pool_->Write(reinterpret_cast<intptr_t>(p), offset, data,
+                              size);
   } else {
     // Audio buffers are allocated from system memory.
-    memcpy(p, data, size);
+    memcpy(static_cast<uint8_t*>(p) + offset, data, size);
   }
 }
 

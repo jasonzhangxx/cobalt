@@ -149,7 +149,6 @@ void MemFdMediaBufferPool::Write(intptr_t position,
                                  size_t size) {
   // fd_ is guaranteed to be >= 0 if Get() returned this instance.
   SB_DCHECK_GE(fd_, 0);
-  SB_DCHECK(!IsPointerAnnotated(position));
 
   if (static_cast<size_t>(position) + size > current_capacity_) {
     SB_LOG(ERROR) << "MemFdMediaBufferPool: Write out of bounds. pos="

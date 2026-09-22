@@ -71,7 +71,17 @@ class MEDIA_EXPORT DecoderBuffer
     // app on allocation failure.
     virtual Handle Allocate(DemuxerStream::Type type, size_t size) = 0;
     virtual void Free(DemuxerStream::Type type, Handle handle, size_t size) = 0;
-    virtual void Write(Handle handle, const void* data, size_t size) = 0;
+    // Writes |size| bytes from |data| into the block |handle|, starting at
+    // |offset| bytes into it.
+    virtual void Write(Handle handle,
+                       size_t offset,
+                       const void* data,
+                       size_t size) = 0;
+
+    // Writes |size| bytes from |data| to the front of the block |handle|.
+    void Write(Handle handle, const void* data, size_t size) {
+      Write(handle, 0u, data, size);
+    }
 
     virtual base::TimeDelta GetBufferGarbageCollectionDurationThreshold()
         const = 0;

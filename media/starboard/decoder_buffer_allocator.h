@@ -75,7 +75,12 @@ class DecoderBufferAllocator : public DecoderBuffer::Allocator,
     virtual ~Strategy() {}
     virtual void* Allocate(DemuxerStream::Type type, size_t size) = 0;
     virtual void Free(DemuxerStream::Type type, void* p) = 0;
-    virtual void Write(void* p, const void* data, size_t size) = 0;
+    // Writes |size| bytes from |data| into the block |p|, starting at |offset|
+    // bytes into it.
+    virtual void Write(void* p,
+                       size_t offset,
+                       const void* data,
+                       size_t size) = 0;
 
     virtual size_t GetCapacity() const = 0;
     virtual size_t GetAllocated() const = 0;
@@ -101,7 +106,14 @@ class DecoderBufferAllocator : public DecoderBuffer::Allocator,
   // DecoderBuffer::Allocator methods.
   Handle Allocate(DemuxerStream::Type type, size_t size) override;
   void Free(DemuxerStream::Type type, Handle p, size_t size) override;
-  void Write(Handle handle, const void* data, size_t size) override;
+  void Write(Handle handle,
+             size_t offset,
+             const void* data,
+             size_t size) override;
+
+  // Overriding the above would otherwise hide the whole-block convenience
+  // overload for callers holding a DecoderBufferAllocator.
+  using DecoderBuffer::Allocator::Write;
 
   base::TimeDelta GetBufferGarbageCollectionDurationThreshold() const override;
 

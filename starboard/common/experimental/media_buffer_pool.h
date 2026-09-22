@@ -121,12 +121,21 @@ class MediaBufferPool {
   // already greater than or equal to |size|.
   bool ExpandTo(size_t size);
 
-  // Writes |size| bytes from |data| into the memory pool starting at
-  // |position|. The caller must ensure that:
+  // Writes |size| bytes from |data| into the memory pool starting at |offset|
+  // bytes past |position|. The caller must ensure that:
   // 1. |position| is annotated.
-  // 2. [|position|, |position| + |size|), once unannotated, is within the
-  // current capacity of the pool. This operation is guaranteed to succeed.
-  void Write(intptr_t position, const void* data, size_t size);
+  // 2. [|position| + |offset|, |position| + |offset| + |size|), once
+  // unannotated, is within the current capacity of the pool. This operation is
+  // guaranteed to succeed.
+  //
+  // |offset| is kept separate from |position| rather than folded into it by the
+  // caller because an annotated pointer cannot be offset: the annotation
+  // assumes the value it wraps is aligned to sizeof(void*).
+  void Write(intptr_t position, size_t offset, const void* data, size_t size);
+
+  void Write(intptr_t position, const void* data, size_t size) {
+    Write(position, 0u, data, size);
+  }
 
  private:
   explicit MediaBufferPool(const StarboardExtensionMediaBufferPoolApi* api);

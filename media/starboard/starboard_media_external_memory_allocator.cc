@@ -137,4 +137,53 @@ StarboardMediaExternalMemoryAllocator::CopyFrom(base::span<const uint8_t> span,
       pool, handle, span.size(), data_ptr, type);
 }
 
+std::unique_ptr<DecoderBuffer::ExternalMemory>
+StarboardMediaExternalMemoryAllocator::CopyFrom(
+    base::span<const base::span<const uint8_t>> parts,
+    DemuxerStream::Type type) {
+  if (parts.size() == 1) {
+    return CopyFrom(parts[0], type);
+  }
+
+  auto* pool = DecoderBufferAllocator::Get();
+  if (!pool) {
+    LOG(ERROR) << "DecoderBufferAllocator instance is not initialized.";
+    return nullptr;
+  }
+
+  size_t total_size = 0;
+  for (const auto& part : parts) {
+    total_size += part.size();
+  }
+  if (total_size == 0) {
+    return std::make_unique<StarboardPoolExternalMemory>(
+        pool, DecoderBuffer::Allocator::kInvalidHandle, 0, nullptr, type);
+  }
+
+  auto handle = pool->Allocate(type, total_size);
+  if (handle == DecoderBuffer::Allocator::kInvalidHandle) {
+    LOG(ERROR) << "Failed to allocate " << total_size
+               << " bytes from Starboard media buffer pool.";
+    return nullptr;
+  }
+
+  size_t offset = 0;
+  for (const auto& part : parts) {
+    if (part.empty()) {
+      continue;
+    }
+    pool->Write(handle, offset, part.data(), part.size());
+    offset += part.size();
+  }
+  DCHECK_EQ(offset, total_size);
+
+  // Cast handle to pointer for read access in span.
+  // Note: If annotated pointers are enabled, IsPointerAnnotated check will
+  // occur when Span().data() is accessed, consistent with
+  // DecoderBuffer::data().
+  const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(handle);
+  return std::make_unique<StarboardPoolExternalMemory>(pool, handle, total_size,
+                                                       data_ptr, type);
+}
+
 }  // namespace media

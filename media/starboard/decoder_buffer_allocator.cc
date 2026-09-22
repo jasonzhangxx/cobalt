@@ -180,6 +180,7 @@ void DecoderBufferAllocator::Free(DemuxerStream::Type type,
 }
 
 void DecoderBufferAllocator::Write(Handle handle,
+                                   size_t offset,
                                    const void* data,
                                    size_t size) {
   // The lock adds overhead to the cases where |handle| is a pointer, so we take
@@ -188,7 +189,7 @@ void DecoderBufferAllocator::Write(Handle handle,
   using ::starboard::experimental::IsPointerAnnotated;
 
   if (!IsPointerAnnotated(handle)) {
-    memcpy(reinterpret_cast<void*>(handle), data, size);
+    memcpy(reinterpret_cast<uint8_t*>(handle) + offset, data, size);
     return;
   }
 
@@ -196,7 +197,7 @@ void DecoderBufferAllocator::Write(Handle handle,
   //                    function to avoid the extra lock.
   base::AutoLock scoped_lock(mutex_);
   DCHECK(strategy_);
-  strategy_->Write(reinterpret_cast<void*>(handle), data, size);
+  strategy_->Write(reinterpret_cast<void*>(handle), offset, data, size);
 }
 
 base::TimeDelta

@@ -59,8 +59,8 @@ class BidirectionalFitDecoderBufferAllocatorStrategy
   void Free(DemuxerStream::Type type, void* p) override {
     bidirectional_fit_allocator_.Free(p);
   }
-  void Write(void* p, const void* data, size_t size) override {
-    memcpy(p, data, size);
+  void Write(void* p, size_t offset, const void* data, size_t size) override {
+    memcpy(static_cast<uint8_t*>(p) + offset, data, size);
   }
 
   size_t GetCapacity() const override {
