@@ -23,6 +23,7 @@
 #include "media/formats/mp4/fourccs.h"
 #include "media/formats/mp4/parse_result.h"
 #include "media/formats/mp4/rcheck.h"
+#include "media/media_buildflags.h"
 
 namespace media {
 namespace mp4 {
@@ -124,6 +125,19 @@ class MEDIA_EXPORT BoxReader : public BufferReader {
                                                     MediaLog* media_log,
                                                     FourCC* out_type,
                                                     size_t* out_box_size);
+
+#if BUILDFLAG(USE_STARBOARD_MEDIA)
+  // Read only the box header (8 or 16 bytes) and return its type and size.
+  // Returns kNeedMoreData only if the header itself is incomplete.
+  // Does NOT require the entire box payload to be present in |buf|.
+  //
+  // |buf| is not retained.
+  [[nodiscard]] static ParseResult ReadTopLevelBoxHeader(const uint8_t* buf,
+                                                         const size_t buf_size,
+                                                         MediaLog* media_log,
+                                                         FourCC* out_type,
+                                                         size_t* out_box_size);
+#endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 
   // Create a BoxReader from a buffer. |buf| must be the complete buffer, as
   // errors are returned when sufficient data is not available. |buf| can start
