@@ -9,6 +9,7 @@
 #include <optional>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "media/base/audio_codecs.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/decoder_buffer.h"
@@ -49,6 +50,26 @@ class MEDIA_EXPORT ExternalMemoryAllocator {
       base::span<const uint8_t> span,
       DemuxerStream::Type type) {
     return CopyFrom(span);
+  }
+
+  // The default implementation concatenates into a temporary and delegates to
+  // the single-span overload, which should not be used in production.
+  virtual std::unique_ptr<DecoderBuffer::ExternalMemory> CopyFrom(
+      base::span<const base::span<const uint8_t>> parts,
+      DemuxerStream::Type type) {
+    if (parts.size() == 1) {
+      return CopyFrom(parts[0], type);
+    }
+    size_t total_size = 0;
+    for (const auto& part : parts) {
+      total_size += part.size();
+    }
+    std::vector<uint8_t> staged;
+    staged.reserve(total_size);
+    for (const auto& part : parts) {
+      staged.insert(staged.end(), part.begin(), part.end());
+    }
+    return CopyFrom(staged, type);
   }
 #endif  // BUILDFLAG(USE_STARBOARD_MEDIA)
 };
